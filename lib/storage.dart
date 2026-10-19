@@ -6,6 +6,8 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
+import 'models.dart';
+
 final class _Blob extends Struct {
   @Uint32()
   external int length;
@@ -110,7 +112,7 @@ class AppSettings {
   bool reducedMotion = false;
   bool automaticUpdates = true;
   double volume = 70;
-  List<String> localFiles = [];
+  List<MusicChat> selectedChannels = [];
   Future<void> _saving = Future.value();
 
   Future<void> load() async {
@@ -119,9 +121,11 @@ class AppSettings {
     reducedMotion = json['reducedMotion'] == true;
     automaticUpdates = json['automaticUpdates'] != false;
     volume = (json['volume'] as num? ?? 70).toDouble().clamp(0, 100);
-    localFiles = (json['localFiles'] as List? ?? [])
-        .whereType<String>()
-        .toList();
+    selectedChannels = [
+      for (final entry in (json['selectedChannels'] as List? ?? []))
+        if (entry is Map && entry['id'] is int && entry['title'] is String)
+          MusicChat(entry['id'] as int, entry['title'] as String),
+    ];
   }
 
   Future<void> save() {
@@ -130,7 +134,10 @@ class AppSettings {
         'reducedMotion': reducedMotion,
         'automaticUpdates': automaticUpdates,
         'volume': volume,
-        'localFiles': localFiles,
+        'selectedChannels': [
+          for (final channel in selectedChannels)
+            {'id': channel.id, 'title': channel.title},
+        ],
       }),
     );
     // Serialize writes so a quick series of slider changes cannot race renames.
