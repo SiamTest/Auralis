@@ -111,13 +111,24 @@ Future<void> main(List<String> arguments) async {
     };
     await player.dispose();
     player = null;
-    stdout.writeln(const JsonEncoder.withIndent('  ').convert(report));
+    // Recreate and dispose during active seeking to exercise queued callbacks.
+    for (var cycle = 0; cycle < 3; cycle++) {
+      player = Player(configuration: const PlayerConfiguration(muted: true));
+      await (player.platform as NativePlayer).setProperty('ao', 'null');
+      await player.open(Media(wave.path));
+      await waitFor(() => player!.state.position.inMilliseconds > 50);
+      await player.seek(const Duration(seconds: 4));
+      await player.dispose();
+      player = null;
+    }
+    report['nativeShutdown'] = {'completed': true, 'cycles': 4};
   } finally {
     if (player != null) await player.dispose();
     if (td != null) await td.close();
     if (proxy != null) await proxy.close();
     await dir.delete(recursive: true);
   }
+  stdout.writeln(const JsonEncoder.withIndent('  ').convert(report));
 }
 
 Future<void> waitFor(bool Function() condition) async {
