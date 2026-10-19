@@ -1,0 +1,245 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:ui' as ui;
+
+import 'package:auralis/app.dart';
+import 'package:auralis/lyrics.dart';
+import 'package:auralis/lyrics_view.dart';
+import 'package:auralis/models.dart';
+import 'package:auralis/player.dart';
+import 'package:auralis/telegram/stream_proxy.dart';
+import 'package:auralis/telegram/telegram_service.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import 'fakes.dart';
+
+const song = Track(
+  id: 'one',
+  title: 'Evening waves',
+  artist: 'Auralis test artist',
+  source: 'Music channel',
+);
+const second = Track(
+  id: 'two',
+  title: 'Morning light',
+  artist: 'Auralis test artist',
+  source: 'Music channel',
+);
+final fixture =
+    '[00:00]A quiet start\n[00:08]Small lights over water\n[00:16]The evening carries us home\n[00:24]We follow the river\n${List.generate(28, (i) => '[${((i + 4) * 8) ~/ 60}:${(((i + 4) * 8) % 60).toString().padLeft(2, '0')}]Original test line ${i + 4}').join('\n')}';
+
+class PendingLyrics extends LyricsRepository {
+  final pending = Completer<Lyrics?>();
+  int calls = 0;
+  @override
+  Future<Lyrics?> find(Track track) {
+    calls++;
+    return pending.future;
+  }
+}
+
+PlayerController controller() =>
+    PlayerController(
+        FakeAudio()..duration = const Duration(minutes: 5),
+        TelegramStreamProxy((_) async => {}),
+        MemorySettings()..reducedMotion = true,
+      )
+      ..queue.add(song)
+      ..index = 0;
+
+Widget view(PlayerController player, LyricsRepository repository) =>
+    MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(
+        body: ListenableBuilder(
+          listenable: player,
+          builder: (_, _) => LyricsView(
+            player: player,
+            repository: repository,
+            artwork: const Icon(Icons.album),
+            onBack: () {},
+          ),
+        ),
+      ),
+    );
+
+void main() {
+  setUpAll(() async {
+    final font = File('C:/Windows/Fonts/segoeui.ttf');
+    if (font.existsSync()) {
+      await (FontLoader('Segoe UI')
+            ..addFont(font.readAsBytes().then((b) => ByteData.sublistView(b))))
+          .load();
+    }
+    await (FontLoader(
+      'MaterialIcons',
+    )..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'))).load();
+  });
+
+  testWidgets(
+    'sync follows playback and seek, manual scrolling can resume, static reads all',
+    (tester) async {
+      final player = controller();
+      final repository = LyricsRepository()..save(song, Lyrics.parse(fixture));
+      addTearDown(player.shutdown);
+      addTearDown(repository.close);
+      await tester.pumpWidget(view(player, repository));
+      await tester.pumpAndSettle();
+      await player.audio.seek(const Duration(seconds: 160));
+      await tester.pumpAndSettle();
+      expect(find.text('Original test line 20'), findsOneWidget);
+      final active = tester.widget<Text>(find.text('Original test line 20'));
+      expect(active.style!.color, ThemeData.dark().colorScheme.primary);
+      await tester.tap(find.byKey(const ValueKey('lyric-21')));
+      await tester.pumpAndSettle();
+      expect(player.audio.position, const Duration(seconds: 168));
+      await tester.drag(
+        find.byKey(const ValueKey('synced-lyrics')),
+        const Offset(0, 200),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Follow song'), findsOneWidget);
+      await tester.tap(find.text('Follow song'));
+      await tester.pumpAndSettle();
+      expect(find.text('Follow song'), findsNothing);
+      await tester.tap(find.text('Static'));
+      await tester.pumpAndSettle();
+      expect(find.byType(SelectableText), findsOneWidget);
+      expect(
+        tester.widget<SelectableText>(find.byType(SelectableText)).data,
+        contains('Original test line 31'),
+      );
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets('lookup needs a click; stale results cannot replace a new song', (
+    tester,
+  ) async {
+    final player = controller();
+    final repository = PendingLyrics();
+    addTearDown(player.shutdown);
+    addTearDown(repository.close);
+    await tester.pumpWidget(view(player, repository));
+    expect(repository.calls, 0);
+    expect(find.textContaining('title, artist and duration'), findsOneWidget);
+    await tester.tap(find.text('Find lyrics'));
+    await tester.pump();
+    expect(repository.calls, 1);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    player.queue[0] = second;
+    await player.audio.seek(Duration.zero);
+    await tester.pump();
+    repository.pending.complete(Lyrics.parse('[00:00]Stale result'));
+    await tester.pumpAndSettle();
+    expect(find.text('Stale result'), findsNothing);
+    expect(find.text('Morning light'), findsOneWidget);
+    expect(find.text('Find lyrics'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+    'plain, not found, instrumental and network errors have useful states',
+    (tester) async {
+      final player = controller();
+      addTearDown(player.shutdown);
+      for (final lyrics in [
+        Lyrics.parse('Original plain words'),
+        null,
+        Lyrics.parse('', instrumental: true),
+      ]) {
+        final repository = LyricsRepository()..save(song, lyrics);
+        await tester.pumpWidget(view(player, repository));
+        await tester.pumpAndSettle();
+        if (lyrics?.instrumental == true) {
+          expect(find.text('Instrumental · no lyrics'), findsOneWidget);
+        } else if (lyrics != null) {
+          expect(find.byType(SelectableText), findsOneWidget);
+          final segment = tester.widget<SegmentedButton<bool>>(
+            find.byType(SegmentedButton<bool>),
+          );
+          expect(segment.segments.first.enabled, isFalse);
+        } else {
+          expect(find.text('No lyrics found for this song.'), findsOneWidget);
+        }
+        await tester.pumpWidget(const SizedBox());
+        repository.close();
+      }
+      final repository = PendingLyrics();
+      await tester.pumpWidget(view(player, repository));
+      await tester.tap(find.text('Find lyrics'));
+      await tester.pump();
+      repository.pending.completeError(const SocketException('offline'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Could not load lyrics'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      repository.close();
+    },
+  );
+
+  testWidgets(
+    'Now Playing opens lyrics, paste works, wide and tiny layouts stay usable',
+    (tester) async {
+      final player = controller();
+      final td = FakeTd();
+      final telegram = TelegramService(
+        Directory('unused'),
+        MemoryVault(),
+        transport: td,
+      );
+      addTearDown(player.shutdown);
+      addTearDown(telegram.shutdown);
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1280, 800);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final boundary = GlobalKey();
+      await tester.pumpWidget(
+        RepaintBoundary(
+          key: boundary,
+          child: AuralisApp(player: player, telegram: telegram),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Lyrics').first);
+      await tester.pumpAndSettle();
+      expect(find.byType(LyricsView), findsOneWidget);
+      await tester.tap(find.text('Paste lyrics instead'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).last, fixture);
+      await tester.tap(find.text('Use lyrics'));
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+      await player.audio.seek(const Duration(seconds: 16));
+      await tester.pumpAndSettle();
+      for (final size in [const Size(1280, 800), const Size(360, 480)]) {
+        tester.view.physicalSize = size;
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull, reason: '$size');
+        expect(find.text('Synced'), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('lyric-2')).hitTestable(),
+          findsOneWidget,
+        );
+        await tester.runAsync(() async {
+          final render =
+              boundary.currentContext!.findRenderObject()!
+                  as RenderRepaintBoundary;
+          final image = await render.toImage();
+          final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+          await File('docs/screenshots/lyrics-${size.width.toInt()}.png')
+              .writeAsBytes(bytes!.buffer.asUint8List());
+          image.dispose();
+        });
+      }
+      await tester.tap(find.byTooltip('Back to cover'));
+      await tester.pumpAndSettle();
+      expect(find.byType(LyricsView), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+}
