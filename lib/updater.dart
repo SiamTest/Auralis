@@ -314,6 +314,7 @@ class AppUpdater extends ChangeNotifier {
     error = null;
     _changed();
     Process? helper;
+    var closing = false;
     try {
       if ((await sha256.bind(installer.openRead()).first).toString() !=
           release.sha256) {
@@ -346,6 +347,7 @@ class AppUpdater extends ChangeNotifier {
               ],
               mode: ProcessStartMode.detached,
             );
+      closing = true;
       if (!await requestExit!()) {
         helper.kill();
         throw StateError('Application exit cancelled');
@@ -353,7 +355,11 @@ class AppUpdater extends ChangeNotifier {
       status = 'Closing Auralis to install the update…';
     } catch (_) {
       helper?.kill();
-      error = 'Could not start the update. Your installed version is unchanged; try again.';
+      error = downloaded == null
+          ? 'The installer changed after verification. Download the update again.'
+          : closing
+          ? 'Auralis could not finish closing for the update. Restart Auralis and retry, or close it and run the downloaded installer manually.'
+          : 'Could not start the installer helper. Close Auralis and run the downloaded installer manually.';
     } finally {
       installing = false;
       _changed();
