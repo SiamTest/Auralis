@@ -47,6 +47,7 @@ Future<void> main() async {
       settings,
     );
     final package = await PackageInfo.fromPlatform();
+    telegram.isStreaming = player.proxy.isStreaming;
     final updater = AppUpdater(
       currentVersion: package.version,
       directory: Directory(p.join(root.path, 'updates')),
