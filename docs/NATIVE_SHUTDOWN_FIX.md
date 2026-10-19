@@ -24,7 +24,7 @@ Revision `1.2.6+auralis.2` retains the Windows COM MTA before each native player
 
 With the COM lifetime revision, three native smoke processes exited naturally with code 0, covering 12 player lifecycles. Each process passed DPAPI, TDLib 1.8.68 initialization/close, an explicit `audio-device-list` query, generated WAV playback and seeking, and loopback playback/seeking through the simulated TDLib cache. Each reported `nativeShutdown: {completed: true, cycles: 4}`. Shutdown-cycle messages now identify progress before destruction, while the success report remains after cleanup. Tests used the native binaries and null audio output described in `VERIFICATION.md` and `THIRD_PARTY_NOTICES.md`.
 
-The fixed revision still needs to pass the GitHub runner with its source-built TDLib and compiled Flutter application. This is a teardown fix, not a refresh or licensing audit of the older native libmpv binary. Live Telegram login, audible hardware output, installer creation/installation, and an end-to-end app update remain unverified.
+The COM lifetime revision subsequently passed the actual [GitHub runner in run 39232305284](https://github.com/SiamTest/Auralis/actions/runs/39232305284), including source-built TDLib, Flutter Windows compilation, the strict native smoke test and installer creation. This is a teardown fix, not a refresh or licensing audit of the older native libmpv binary. Live Telegram login, audible hardware output, installer installation and an end-to-end app update remain unverified.
 
 ## Apply to the existing repository
 
