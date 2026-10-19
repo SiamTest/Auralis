@@ -1,22 +1,29 @@
-Complete Auralis project: Windows COM shutdown follow-up
+Complete Auralis project: selected-channel Library, music covers and channel photos
 
-This full archive includes the app, Windows runner/header fix, all build/packaging scripts and tests, TDLib build caching, and media_kit 1.2.6+auralis.2 with the Windows COM lifetime follow-up. It is an entire project, not just changed files.
+This ZIP contains the entire project, including a channel-only Telegram browser, an original Auralis app/installer icon, automatic stable release publication, the Windows COM shutdown fix, TDLib build caching, all source/build/packaging files and tests. Project files are at the ZIP root, without an extra parent folder.
 
-The earlier callback-ordering patch did not resolve CI: the next trace still crashed at libmpv-2.dll+0x13fa81. Inspection maps that address to Windows WASAPI device-monitor teardown. The new revision retains Windows COM's MTA from player creation until native destruction and callback closure. It does not ignore crashes, force process exit, or disable device enumeration. See docs/NATIVE_SHUTDOWN_FIX.md.
+1. Extract the ZIP.
+2. Upload all extracted files and folders into the existing SiamTest/Auralis repository root, including .github, lib, windows, test, tool, third_party, native, docs, LICENSE, pubspec.yaml and pubspec.lock. Do not upload just the ZIP or treat a partial patch as the complete project.
+3. Commit to main. The new workflow runs the checks/build/packaging, then automatically publishes a stable release if the version has not already been published. Re-running an old commit cannot apply this change.
 
-The project files are at the ZIP root; there is no extra auralis/ parent folder. This replaces older patch-only upload instructions.
+Current version 0.1.3+4 produces stable tag/release v0.1.3. The tag is created at the exact tested commit. A release is explicitly NOT a prerelease, and remains a draft until uploaded asset checksums are verified. Main/manual-main and matching version-tag builds can publish; other branches and PRs cannot.
 
-1. Extract the ZIP on your computer.
-2. In SiamTest/Auralis, upload ALL extracted files and folders into the repository root, including .github, lib, windows, test, tool, third_party, native, docs, LICENSE, pubspec.yaml and pubspec.lock. Do not upload only the ZIP itself or put these files inside another project folder.
-3. Commit the upload to main. A fresh Windows workflow starts on the new commit. Re-running the previous commit cannot restore its missing files.
+For later app updates, bump pubspec.yaml to a new stable version such as 0.1.4+5 and commit to main. Published versions and tags are never overwritten or moved. A push with the same published version skips release mutation. Installer updates require a newer stable version.
 
-After upload, confirm these pages exist on GitHub:
-https://github.com/SiamTest/Auralis/blob/main/tool/package.ps1
-https://github.com/SiamTest/Auralis/blob/main/lib/main.dart
-https://github.com/SiamTest/Auralis/blob/main/windows/CMakeLists.txt
+The earlier GitHub run 39232305284 successfully built the app, passed native shutdown tests and compiled the installer, but skipped publication because the previous workflow was tag-only. That run saved the TDLib cache. This workflow edit changes its cache key, so the next run rebuilds TDLib once; later matching runs can reuse it.
 
-The earlier win32_window.h fix is preserved. Commit pubspec.lock and the entire third_party/media_kit directory, including its MIT LICENSE. The new lockfile must resolve media_kit to 1.2.6+auralis.2.
+Local verification: static analysis and all 51 tests passed, including the channel-only filter/title-update regression, responsive connected-state checks and the 14 publisher tests with a fake GitHub CLI. The unchanged workflow passed its earlier checks. Tests did not publish anything. The native implementation matches the successfully built app.
 
-Checks: source archive integrity/completeness and extracted package version validation. The app suite passed 22 tests, and the final native repeat test passed three processes with four shutdowns each (12 total), including an explicit audio-device-list query and real Windows COM usage-cookie calls.
+The current GitHub connection has READ permission, so this task has not uploaded this change or created a release. Actual GitHub publication, installer installation, live Telegram playback and in-app update execution remain unverified. The existing native corresponding-source/license/security audit is still outstanding; technical checks and a stable-release flag do not clear it for public binary distribution. See README.md, docs/UPDATES.md, docs/VERIFICATION.md and THIRD_PARTY_NOTICES.md.
 
-The CI crash has not reproduced locally, including before this follow-up, so local passes do not establish that the CI failure is fixed. The updated full GitHub build still needs verification. No executable/installer is included; live Telegram login, audible output and installer/update execution remain unverified. This task has READ-only GitHub access and has not pushed a commit.
+Icon fix: the stock Flutter ICO is replaced by an original violet A/play mark, with ten transparent frame sizes from 16 to 256 pixels. The app executable/window/Start menu and Inno Setup installer use it. Rebuild and install the new version. If an old pinned shortcut still shows Flutter's cached icon, unpin it and pin the newly installed Auralis app again. The artwork and ICO are checked locally; the rebuilt EXE/taskbar/installer still need GitHub or a Windows C++ build machine for verification.
+
+Name correction: the navigation header now displays Auralis with a capital A, matching the window title, About dialog and installer.
+
+Channel-only browser: private chats, bot conversations, basic groups and non-channel supergroups are hidden. TDLib's explicit is_channel flag determines inclusion; title updates cannot add hidden chats back. Search, counts, empty states and navigation say channels. Main and archived Telegram lists still load incrementally via Load more; filtering may leave an early page empty, so load more if needed. This does not delete or alter anything in Telegram.
+
+Original-quality streaming: the selected Telegram file's bytes are forwarded without re-encoding or bitrate reduction. The full-file SHA-256 and exact seek-range regression checks passed. Slow downloads buffer or show an error instead of switching quality. Bit-perfect hardware output and live-account playback remain unverified; see README.md.
+
+Selected-channel Library: check one or more channels in Telegram, then open Library for their combined music. Selection is saved. All older audio/document pages load automatically with progress and partial errors. Deselecting a channel removes its Library tracks; queued tracks remain until cleared. Refresh scans for new music. Local-file importing and playback, its shortcut and file-picker dependency are removed. Old local-path settings are ignored without deleting files.
+
+Artwork: Telegram-provided covers appear in Library, queue, Now Playing and the player bar; channel photos appear beside selection. Images load on demand at low priority, with a bounded request cache and generated fallback. Full-size embedded-art extraction is not implemented; absent Telegram thumbnails keep the fallback. Test screenshots use the original app icon as a photo fixture, not real Telegram images. Live-account behavior and the rebuilt installer remain unverified.
