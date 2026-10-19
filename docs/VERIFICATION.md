@@ -93,3 +93,26 @@ Final local verification of the patch:
 - Updated workflow YAML parsed successfully: 13 build steps and a tag-only publisher dependent on successful build.
 
 The original failure was not reproduced by the unpatched local smoke run. These results support the shutdown fix but do not establish that the GitHub-specific crash is resolved: the patched commit has not run there. The connection remains READ-only. No new executable/installer was built locally, no remote commit was pushed, and no release was published.
+
+## TDLib build cache follow-up
+
+The workflow now uses pinned `actions/cache/restore` and `actions/cache/save` to reuse the compiled TDLib/dependency DLLs, notices and manifest. An exact hit skips compilation; a miss builds from the existing pinned source. Saving happens immediately after native compilation succeeds, before later app-build/test/package steps. Cache keys include the Windows image version and build-script/workflow hashes; there is no prefix fallback.
+
+Verification for this configuration-only change:
+
+- Official `actionlint` 1.7.12 Windows x64 executable, downloaded from its project release and SHA-256 checked against its release checksum file: workflow passed without findings.
+- Parsed YAML and checked restore/build/save order, matching cache payload/key, miss-only compilation/save, required source/image invalidation, unconditional native smoke tests and preserved tag-only publishing.
+- Executed the actual new PowerShell image-identification block with a valid fixture value: wrote the expected step output. Missing image metadata failed explicitly without producing an ambiguous key.
+- Confirmed GitHub's Windows runner environment configuration exports `ImageVersion`.
+
+No application source or native code changed in this follow-up; the previous app/native checks were not rerun. Real cache upload/download, a cache hit and speedup remain unverified on GitHub because the API connection has READ permission and no authenticated Chrome session is exposed to the browser tool. The currently running old workflow cannot adopt this change midway through. Its outputs were not cached by that old workflow. The first new run needs to build TDLib to seed its cache.
+
+## Persistent native failure and COM lifetime follow-up
+
+The user subsequently supplied a strict smoke-process failure inside `_terminateDestroy`, again at native offset `0x13fa81`. The earlier callback-ordering fix was insufficient. Native disassembly/string/import analysis maps that operation to WASAPI hotplug notification unregistration. See `NATIVE_SHUTDOWN_FIX.md` for evidence and primary source links.
+
+Current vendored runtime: media_kit `1.2.6+auralis.2`. Each Windows player retains an OS-managed MTA usage cookie before creation and releases it only after native destruction and callback closure. HRESULTs and native initialization failures are checked. The strict smoke test additionally queries `audio-device-list` explicitly and prints shutdown-cycle progress; it still requires natural exit code 0.
+
+Local follow-up checks: static analysis reported no issues; all 22 existing app/UI/Telegram/proxy/update/packaging tests passed. The final native repeat run passed all three processes, four player lifecycles each (12 total), including device monitoring, decoding, seek, loopback proxy and shutdown. Tests used the same pinned libmpv binary, real Windows COM lifetime APIs, and the test TDLib binary described in the notices.
+
+The original and intermediate unpatched local probes also exited cleanly. The exact CI crash remains unreproduced locally; this follow-up is a targeted fix awaiting the actual GitHub runner, not a claim that CI now passes. Full app compilation, installer creation/installation, audible device output and live Telegram playback remain unverified here. TDLib caching is included. No remote commit or release was made with the READ-only connection.
