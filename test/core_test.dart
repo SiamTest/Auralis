@@ -14,12 +14,14 @@ void main() {
     final message = <String, dynamic>{
       'id': 100,
       'chat_id': -20,
+      'date': 1700000000,
       'content': {
         '@type': 'messageAudio',
         'audio': {
           'title': 'Night drive',
           'performer': 'Example artist',
           'duration': 210,
+          'album_cover_minithumbnail': {'data': 'AQID'},
           'file_name': 'night.mp3',
           'mime_type': 'audio/mpeg',
           'album_cover_thumbnail': {
@@ -43,10 +45,13 @@ void main() {
     expect(track.fileId, 7);
     expect(track.coverFileId, 91);
     expect(track.duration.inSeconds, 210);
+    expect(track.date, 1700000000);
+    expect(track.coverPreview, [1, 2, 3]);
     message['content'] = {
       '@type': 'messageDocument',
       'document': {
         'file_name': 'music.FLAC',
+        'minithumbnail': {'data': 'BAUG'},
         'thumbnail': {
           'file': {'id': 92},
         },
@@ -55,10 +60,72 @@ void main() {
     };
     expect(Track.fromMessage(message, 'Chat')!.title, 'music');
     expect(Track.fromMessage(message, 'Chat')!.coverFileId, 92);
+    expect(Track.fromMessage(message, 'Chat')!.coverPreview, [4, 5, 6]);
     message['content']['document']['file_name'] = 'readme.pdf';
     expect(Track.fromMessage(message, 'Chat'), isNull);
     message['content'] = {'@type': 'messageVoiceNote'};
     expect(Track.fromMessage(message, 'Chat'), isNull);
+  });
+
+  test('channel previews decode safely and invalid previews use fallback', () {
+    final chat = MusicChat.fromChat({
+      'id': -1,
+      'title': 'Music',
+      'type': {'@type': 'chatTypeSupergroup', 'is_channel': true},
+      'photo': {
+        'minithumbnail': {'data': 'AQID'},
+      },
+    });
+    expect(chat!.photoPreview, [1, 2, 3]);
+    expect(decodePreview('%%%'), isNull);
+    expect(decodePreview('A' * 70000), isNull);
+    expect(decodePreview(null), isNull);
+  });
+
+  test('Library sort merges channel dates and handles case, ties and unknown fields', () {
+    const a = Track(
+      id: '1',
+      title: 'beta',
+      artist: 'Zed',
+      source: 'One',
+      date: 300,
+      duration: Duration(seconds: 60),
+    );
+    const b = Track(
+      id: '2',
+      title: 'Alpha',
+      artist: 'able',
+      source: 'Two',
+      date: 100,
+      duration: Duration(seconds: 180),
+    );
+    const c = Track(
+      id: '3',
+      title: 'alpha',
+      artist: 'Able',
+      source: 'One',
+      date: 200,
+      duration: Duration(seconds: 120),
+    );
+    const unknown = Track(
+      id: '4',
+      title: 'Unknown',
+      artist: 'Unknown',
+      source: 'One',
+    );
+    final original = [a, b, c, unknown];
+    final expected = {
+      LibrarySort.newest: ['1', '3', '2', '4'],
+      LibrarySort.oldest: ['2', '3', '1', '4'],
+      LibrarySort.title: ['2', '3', '1', '4'],
+      LibrarySort.artist: ['2', '3', '4', '1'],
+      LibrarySort.duration: ['1', '3', '2', '4'],
+    };
+    for (final sort in LibrarySort.values) {
+      final ordered = [...original]..sort(sort.compare);
+      expect(ordered.map((t) => t.id), expected[sort], reason: sort.name);
+    }
+    expect(original, [a, b, c, unknown]);
   });
 
   test('settings serialize rapid writes and clamp persisted volume', () async {
@@ -68,6 +135,7 @@ void main() {
     final settings = AppSettings(file)
       ..volume = 23
       ..reducedMotion = true
+      ..librarySort = LibrarySort.artist
       ..selectedChannels = [
         const MusicChat(-20, 'Music'),
         const MusicChat(-30, 'Albums'),
@@ -80,17 +148,20 @@ void main() {
     await restored.load();
     expect(restored.volume, 45);
     expect(restored.reducedMotion, isTrue);
+    expect(restored.librarySort, LibrarySort.artist);
     expect(restored.selectedChannels.map((c) => c.id), [-20, -30]);
     expect(restored.selectedChannels.map((c) => c.title), ['Music', 'Albums']);
     await file.writeAsString(
       jsonEncode({
         'volume': 200,
         'localFiles': ['C:/old.wav'],
+        'librarySort': 'invalid',
       }),
     );
     await restored.load();
     expect(restored.volume, 100);
     expect(restored.selectedChannels, isEmpty);
+    expect(restored.librarySort, LibrarySort.newest);
     await restored.save();
     expect(
       jsonDecode(await file.readAsString()),
