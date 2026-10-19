@@ -1334,7 +1334,7 @@ class _PlayerShellState extends State<PlayerShell> {
                   const Divider(),
                 ],
                 Text(
-                  'Auralis ${widget.updater?.currentVersion ?? '0.1.12'} · AGPL-3.0-or-later\nIndependent Flutter interface. Playback by libmpv. Telegram connectivity by TDLib.',
+                  'Auralis ${widget.updater?.currentVersion ?? '0.1.13'} · AGPL-3.0-or-later\nIndependent Flutter interface. Playback by libmpv. Telegram connectivity by TDLib.',
                   style: const TextStyle(
                     color: muted,
                     fontSize: 12,
@@ -1343,11 +1343,29 @@ class _PlayerShellState extends State<PlayerShell> {
                 ),
                 if (telegram.ready)
                   TextButton(
-                    onPressed: () async {
-                      await player.clear();
-                      await telegram.logout();
-                      if (dialogContext.mounted) Navigator.pop(dialogContext);
-                    },
+                    onPressed: telegram.busy
+                        ? null
+                        : () async {
+                            await player.clear();
+                            await telegram.logout();
+                            if (telegram.ready && telegram.error != null) {
+                              _notice(telegram.error!);
+                            }
+                            if (!telegram.ready) {
+                              player.settings.selectedChannels = [];
+                              try {
+                                await player.settings.save();
+                              } catch (_) {
+                                _notice(
+                                  'Signed out, but the old channel selection could not be removed from settings.',
+                                );
+                              }
+                            }
+                            if (dialogContext.mounted) {
+                              Navigator.pop(dialogContext);
+                            }
+                            if (mounted && !telegram.ready) _openTelegram();
+                          },
                     child: const Text('Sign out of Telegram'),
                   ),
               ],
@@ -1359,7 +1377,7 @@ class _PlayerShellState extends State<PlayerShell> {
             onPressed: () => showLicensePage(
               context: context,
               applicationName: 'Auralis',
-              applicationVersion: widget.updater?.currentVersion ?? '0.1.12',
+              applicationVersion: widget.updater?.currentVersion ?? '0.1.13',
             ),
             child: const Text('Licenses'),
           ),
@@ -1398,6 +1416,10 @@ class _AuthFormState extends State<AuthForm> {
     final td = widget.telegram;
     if (_lastState != td.state) {
       value.clear();
+      if (td.state == 'disconnected') {
+        apiId.clear();
+        apiHash.clear();
+      }
       _lastState = td.state;
     }
     final initial = td.state == 'disconnected';
@@ -1462,6 +1484,7 @@ class _AuthFormState extends State<AuthForm> {
             'authorizationStateWaitRegistration' => 'Create your Telegram account in the official app first, then restart Auralis.',
             'authorizationStateClosed' =>
               'Telegram was closed. Restart Auralis to reconnect.',
+            'authorizationStateLoggingOut' => 'Signing out of Telegram… Keep your internet connection available. The API ID and hash form will appear when sign-out finishes.',
             'authorizationStateWaitPremiumPurchase' => 'Telegram requires a Premium verification step. Complete it in the official app.',
             'authorizationStateWaitOtherDeviceConfirmation' =>
               'Confirm this sign-in in your Telegram application.',
