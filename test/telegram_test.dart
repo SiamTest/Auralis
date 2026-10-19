@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -6,38 +5,6 @@ import 'package:auralis/telegram/td_transport.dart';
 import 'package:auralis/telegram/telegram_service.dart';
 
 import 'fakes.dart';
-
-class FakeTd extends TdTransport {
-  final events = StreamController<Json>.broadcast(sync: true);
-  final requests = <Json>[];
-  @override
-  Stream<Json> get updates => events.stream;
-  @override
-  Future<void> start(String libraryPath) async {}
-  @override
-  Future<Json> request(
-    Json json, {
-    Duration timeout = const Duration(seconds: 30),
-  }) async {
-    requests.add(json);
-    if (json['@type'] == 'getAuthorizationState') {
-      return {'@type': 'authorizationStateWaitTdlibParameters'};
-    }
-    if (json['@type'] == 'searchChatMessages') {
-      return {'messages': [], 'next_from_message_id': 777};
-    }
-    return {'@type': 'ok'};
-  }
-
-  void auth(String state) => events.add({
-    '@type': 'updateAuthorizationState',
-    'authorization_state': {'@type': state},
-  });
-  @override
-  Future<void> close() async {
-    await events.close();
-  }
-}
 
 void main() {
   test('auth drives phone, code and 2FA with encrypted database parameters; codes are not stored', () async {
@@ -73,14 +40,103 @@ void main() {
     expect(td.requests.where((r) => r['@type'] == 'loadChats').length, 2);
     td.events.add({
       '@type': 'updateNewChat',
-      'chat': {'id': 1, 'title': 'Music'},
+      'chat': {
+        'id': 1,
+        'title': 'Music',
+        'type': {'@type': 'chatTypeSupergroup', 'is_channel': true},
+      },
     });
-    expect(service.chats.single.title, 'Music');
-    await service.music(1, 'Music', documents: true, before: 123);
+    expect(service.channels.single.title, 'Music');
+    final page = await service.music(1, 'Music', documents: true, before: 123);
     expect(td.requests.last['filter']['@type'], 'searchMessagesFilterDocument');
     expect(td.requests.last['from_message_id'], 123);
-    expect(service.nextMessageId, 777);
+    expect(page.nextMessageId, 777);
   });
+  test(
+    'only channels are listed, including after title and load-more updates',
+    () async {
+      final dir = await Directory.systemTemp.createTemp('auralis-channels-');
+      addTearDown(() => dir.delete(recursive: true));
+      final td = FakeTd();
+      final service = TelegramService(dir, MemoryVault(), transport: td);
+      addTearDown(service.shutdown);
+      await service.start(
+        apiId: 12345,
+        apiHash: 'abcdef0123456789abcdef0123456789',
+      );
+
+      final types = <Json>[
+        {'@type': 'chatTypePrivate', 'user_id': 1},
+        {
+          '@type': 'chatTypePrivate',
+          'user_id': 2,
+        }, // Bot conversations use this type too.
+        {'@type': 'chatTypeBasicGroup', 'basic_group_id': 3},
+        {'@type': 'chatTypeSupergroup', 'is_channel': false},
+        {'@type': 'chatTypeSecret', 'secret_chat_id': 5},
+        {'@type': 'chatTypeSupergroup'},
+        {'@type': 'chatTypeSupergroup', 'is_channel': true},
+      ];
+      for (var i = 0; i < types.length; i++) {
+        td.events.add({
+          '@type': 'updateNewChat',
+          'chat': {'id': i + 1, 'title': 'Chat ${i + 1}', 'type': types[i]},
+        });
+      }
+      td.events.add({
+        '@type': 'updateNewChat',
+        'chat': {'id': 8, 'title': 'Unknown type'},
+      });
+      expect(service.channels.map((c) => c.id), [7]);
+      for (var id = 1; id <= 9; id++) {
+        td.events.add({
+          '@type': 'updateChatTitle',
+          'chat_id': id,
+          'title': 'Renamed $id',
+        });
+      }
+      expect(service.channels.single.id, 7);
+      expect(service.channels.single.title, 'Renamed 7');
+
+      await service.refreshChats();
+      expect(
+        td.requests
+            .where((r) => r['@type'] == 'loadChats')
+            .map((r) => r['chat_list']['@type']),
+        ['chatListMain', 'chatListArchive'],
+      );
+      td.events.add({
+        '@type': 'updateNewChat',
+        'chat': {
+          'id': 10,
+          'title': 'Archived music',
+          'type': {'@type': 'chatTypeSupergroup', 'is_channel': true},
+        },
+      });
+      td.events.add({
+        '@type': 'updateNewChat',
+        'chat': {
+          'id': 11,
+          'title': 'New group',
+          'type': {'@type': 'chatTypeSupergroup', 'is_channel': false},
+        },
+      });
+      expect(service.channels.map((c) => c.id), [10, 7]);
+      // A replacement without channel metadata must not keep an old entry visible.
+      td.events.add({
+        '@type': 'updateNewChat',
+        'chat': {'id': 7, 'title': 'No longer a channel', 'type': types[0]},
+      });
+      td.events.add({
+        '@type': 'updateChatTitle',
+        'chat_id': 7,
+        'title': 'Still hidden',
+      });
+      expect(service.channels.map((c) => c.id), [10]);
+      await service.logout();
+      expect(service.channels, isEmpty);
+    },
+  );
   test(
     'invalid credentials fail before any native client is started',
     () async {
