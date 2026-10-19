@@ -149,11 +149,11 @@ class PlayerController extends ChangeNotifier {
     error = null;
     notifyListeners();
     try {
-      final uri = track.path ?? (await proxy.uri(track)).toString();
+      final uri = (await proxy.uri(track)).toString();
       if (generation != _generation) return;
       await audio.open(uri);
     } catch (_) {
-      if (generation == _generation) error = 'Could not open this track. Check the file, Telegram connection, and native libraries.';
+      if (generation == _generation) error = 'Could not open this track. Check the Telegram connection and native libraries.';
     } finally {
       if (generation == _generation) {
         loading = false;
