@@ -1,13 +1,14 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
-import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'models.dart';
 import 'player.dart';
 import 'telegram/telegram_service.dart';
+import 'telegram/channel_library.dart';
 import 'updater.dart';
 import 'update_widgets.dart';
 
@@ -78,66 +79,34 @@ class PlayerShell extends StatefulWidget {
 }
 
 class _PlayerShellState extends State<PlayerShell> {
-  int destination = 0, cursor = 0, _browseGeneration = 0;
+  int destination = 0;
   final search = TextEditingController();
-  List<Track> local = [], telegramTracks = [];
-  MusicChat? chat;
-  bool loading = false, documents = false;
-  String? browseError;
+  late final ChannelLibrary library;
   PlayerController get player => widget.player;
   TelegramService get telegram => widget.telegram;
   @override
   void initState() {
     super.initState();
-    local = player.settings.localFiles.map(Track.local).toList();
+    library = ChannelLibrary(telegram, player.settings);
     search.addListener(_changed);
-    telegram.addListener(_telegramChanged);
   }
 
   void _changed() {
     if (mounted) setState(() {});
   }
 
-  void _telegramChanged() {
-    if (!telegram.ready && (chat != null || telegramTracks.isNotEmpty)) {
-      ++_browseGeneration;
-      chat = null;
-      telegramTracks = [];
-      loading = false;
-    }
-    _changed();
-  }
-
   @override
   void dispose() {
-    telegram.removeListener(_telegramChanged);
+    library.dispose();
     search.dispose();
     super.dispose();
   }
 
-  Future<void> _import() async {
-    try {
-      final files = await openFiles(
-        acceptedTypeGroups: [
-          const XTypeGroup(label: 'Audio', extensions: audioExtensions),
-        ],
-      );
-      if (!mounted || files.isEmpty) return;
-      final paths = {
-        ...player.settings.localFiles,
-        ...files.map((f) => f.path),
-      }.toList();
-      player.settings.localFiles = paths;
-      await player.settings.save();
-      if (mounted) {
-        setState(() {
-          local = paths.map(Track.local).toList();
-          destination = 0;
-        });
-      }
-    } catch (_) {
-      _notice('Could not import audio. Check file access and try again.');
-    }
+  void _openTelegram() {
+    setState(() {
+      search.clear();
+      destination = 1;
+    });
   }
 
   void _notice(String value) {
@@ -147,55 +116,14 @@ class _PlayerShellState extends State<PlayerShell> {
     }
   }
 
-  Future<void> _browse(MusicChat selected, {bool more = false}) async {
-    final generation = ++_browseGeneration;
-    setState(() {
-      chat = selected;
-      loading = true;
-      browseError = null;
-      if (!more) {
-        telegramTracks = [];
-        cursor = 0;
-      }
-    });
-    try {
-      final result = await telegram.music(
-        selected.id,
-        selected.title,
-        before: more ? cursor : 0,
-        documents: documents,
-      );
-      if (!mounted || generation != _browseGeneration) return;
-      setState(() {
-        final ids = telegramTracks.map((t) => t.id).toSet();
-        telegramTracks.addAll(result.where((t) => ids.add(t.id)));
-        cursor = telegram.nextMessageId;
-      });
-    } catch (_) {
-      if (mounted && generation == _browseGeneration) {
-        setState(() {
-          browseError = 'Could not load this chat. Check access and connection, then retry.';
-        });
-      }
-    } finally {
-      if (mounted && generation == _browseGeneration) {
-        setState(() {
-          loading = false;
-        });
-      }
-    }
-  }
-
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: Listenable.merge([player, telegram]),
+    listenable: Listenable.merge([player, telegram, library]),
     builder: (context, _) => LayoutBuilder(
       builder: (context, box) {
         final narrow = box.maxWidth < 760, wide = box.maxWidth >= 1220;
         return CallbackShortcuts(
           bindings: {
-            const SingleActivator(LogicalKeyboardKey.keyO, control: true): () =>
-                unawaited(_import()),
             const SingleActivator(LogicalKeyboardKey.mediaPlayPause): () =>
                 unawaited(player.audio.toggle()),
             const SingleActivator(LogicalKeyboardKey.mediaTrackNext): () =>
@@ -311,7 +239,7 @@ class _PlayerShellState extends State<PlayerShell> {
                 child: FittedBox(
                   fit: BoxFit.scaleDown,
                   child: Text(
-                    'auralis',
+                    'Auralis',
                     style: TextStyle(
                       fontSize: 27,
                       fontWeight: FontWeight.w700,
@@ -415,7 +343,7 @@ class _PlayerShellState extends State<PlayerShell> {
             Text(
               [
                 'YOUR COLLECTION',
-                'MUSIC IN YOUR CHATS',
+                'MUSIC IN YOUR CHANNELS',
                 'KEEP THE GOOD ONES GOING',
                 'IN THE MOMENT',
               ][destination],
@@ -438,17 +366,11 @@ class _PlayerShellState extends State<PlayerShell> {
         ),
       ),
       if (destination == 0)
-        narrow
-            ? IconButton(
-                onPressed: _import,
-                tooltip: 'Add music',
-                icon: const Icon(Icons.add_rounded),
-              )
-            : FilledButton.icon(
-                onPressed: _import,
-                icon: const Icon(Icons.add_rounded, size: 19),
-                label: const Text('Add music'),
-              ),
+        IconButton(
+          onPressed: _openTelegram,
+          tooltip: 'Choose channels',
+          icon: const Icon(Icons.playlist_add_rounded),
+        ),
     ],
   );
   Widget _banner(String text) => Container(
@@ -483,38 +405,87 @@ class _PlayerShellState extends State<PlayerShell> {
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       _search('Search your music'),
-      const SizedBox(height: 22),
+      const SizedBox(height: 12),
       Wrap(
         spacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           Chip(
             avatar: const Icon(Icons.music_note_rounded, size: 17),
-            label: Text('${local.length} tracks'),
+            label: Text('${library.tracks.length} tracks'),
           ),
-          const Chip(label: Text('On this device')),
+          Chip(
+            label: Text(
+              '${player.settings.selectedChannels.length} selected channels',
+            ),
+          ),
+          TextButton.icon(
+            onPressed: !telegram.ready || library.saving
+                ? null
+                : () {
+                    telegram.clearImageCache();
+                    unawaited(library.refresh());
+                  },
+            icon: const Icon(Icons.refresh_rounded, size: 17),
+            label: const Text('Refresh'),
+          ),
         ],
       ),
-      const SizedBox(height: 12),
+      if (library.error != null) _banner(library.error!),
+      if (library.loading) ...[
+        const LinearProgressIndicator(minHeight: 2),
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 8),
+          child: Text(
+            'Loading music from your channels…',
+            style: TextStyle(color: muted, fontSize: 11),
+          ),
+        ),
+      ],
+      const SizedBox(height: 8),
       Expanded(
-        child: local.isEmpty
+        child: !telegram.ready
             ? _empty(
-                Icons.library_music_rounded,
-                'Make room for your music',
-                'Add a few favorite tracks, or connect Telegram.\nEverything starts with something you love.',
+                Icons.send_rounded,
+                'Connect Telegram for your music',
+                'Sign in and choose channels to fill your Library.',
                 action: FilledButton.tonalIcon(
-                  onPressed: _import,
-                  icon: const Icon(Icons.add),
-                  label: const Text('Choose audio files'),
+                  onPressed: _openTelegram,
+                  icon: const Icon(Icons.send_rounded),
+                  label: const Text('Connect Telegram'),
                 ),
               )
-            : _trackList(local),
+            : player.settings.selectedChannels.isEmpty
+            ? _empty(
+                Icons.campaign_rounded,
+                'Choose your music channels',
+                'Select channels in Telegram. Their music appears here together.',
+                action: FilledButton.tonalIcon(
+                  onPressed: _openTelegram,
+                  icon: const Icon(Icons.playlist_add_rounded),
+                  label: const Text('Choose channels'),
+                ),
+              )
+            : library.tracks.isEmpty
+            ? _empty(
+                Icons.library_music_rounded,
+                library.loading ? 'Finding your music' : 'No music loaded',
+                library.loading
+                    ? 'Tracks appear here as your channels load.'
+                    : 'Refresh to try again, or choose different channels.',
+              )
+            : _trackList(library.tracks),
       ),
     ],
   );
   Widget _trackList(List<Track> tracks) {
     final query = search.text.toLowerCase();
     final visible = tracks
-        .where((t) => '${t.title} ${t.artist}'.toLowerCase().contains(query))
+        .where(
+          (t) => '${t.title} ${t.artist} ${t.source}'.toLowerCase().contains(
+            query,
+          ),
+        )
         .toList();
     if (visible.isEmpty) {
       return _empty(
@@ -556,7 +527,12 @@ class _PlayerShellState extends State<PlayerShell> {
           leading: SizedBox(
             width: 42,
             height: 42,
-            child: Artwork(seed: track.title, small: true),
+            child: Artwork(
+              seed: track.title,
+              small: true,
+              telegram: telegram,
+              fileId: track.coverFileId,
+            ),
           ),
           title: Text(
             track.title.isEmpty ? 'Untitled audio' : track.title,
@@ -569,7 +545,7 @@ class _PlayerShellState extends State<PlayerShell> {
             ),
           ),
           subtitle: Text(
-            track.artist,
+            '${track.artist} · ${track.source}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 11, color: muted),
@@ -609,151 +585,95 @@ class _PlayerShellState extends State<PlayerShell> {
 
   Widget _telegram() {
     if (!telegram.ready) return _signIn();
-    if (chat == null) {
-      final chats = telegram.chats
-          .where(
-            (c) => c.title.toLowerCase().contains(search.text.toLowerCase()),
-          )
-          .toList();
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _search('Find an accessible channel or chat'),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '${chats.length} chats · ${telegram.connection}',
-                  style: const TextStyle(fontSize: 11, color: muted),
-                ),
-              ),
-              TextButton.icon(
-                onPressed: telegram.busy
-                    ? null
-                    : () => telegram.action(telegram.refreshChats),
-                icon: const Icon(Icons.refresh_rounded, size: 17),
-                label: const Text('Load more'),
-              ),
-            ],
-          ),
-          if (telegram.error != null) _banner(telegram.error!),
-          Expanded(
-            child: chats.isEmpty
-                ? _empty(
-                    Icons.forum_outlined,
-                    'No chats to show',
-                    'Join a channel in Telegram, then load your chats here.',
-                  )
-                : ListView.builder(
-                    itemCount: chats.length,
-                    itemBuilder: (context, i) => ListTile(
-                      leading: const CircleAvatar(
-                        backgroundColor: Color(0xFF30283E),
-                        child: Icon(
-                          Icons.forum_rounded,
-                          size: 20,
-                          color: accent,
-                        ),
-                      ),
-                      title: Text(
-                        chats[i].title,
-                        style: const TextStyle(fontSize: 13),
-                      ),
-                      subtitle: const Text(
-                        'Browse shared audio',
-                        style: TextStyle(color: muted, fontSize: 11),
-                      ),
-                      trailing: const Icon(Icons.chevron_right_rounded),
-                      onTap: () => _browse(chats[i]),
-                    ),
-                  ),
-          ),
-        ],
-      );
-    }
+    final query = search.text.toLowerCase();
+    final channels =
+        {
+            for (final c in player.settings.selectedChannels) c.id: c,
+            for (final c in telegram.channels) c.id: c,
+          }.values.where((c) => c.title.toLowerCase().contains(query)).toList()
+          ..sort(
+            (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
+          );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            IconButton(
-              onPressed: () {
-                ++_browseGeneration;
-                setState(() {
-                  chat = null;
-                  loading = false;
-                  search.clear();
-                });
-              },
-              tooltip: 'All chats',
-              icon: const Icon(Icons.arrow_back_rounded),
-            ),
-            Expanded(
-              child: Text(
-                chat!.title,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-            ),
-            IconButton(
-              onPressed: loading ? null : () => _browse(chat!),
-              tooltip: 'Refresh music',
-              icon: const Icon(Icons.refresh_rounded),
-            ),
-          ],
-        ),
+        _search('Find an accessible channel'),
         const SizedBox(height: 8),
-        _search('Search loaded tracks'),
-        const SizedBox(height: 12),
+        const Text(
+          'Select channels to combine their music in Library.',
+          style: TextStyle(color: muted, fontSize: 12),
+        ),
         Wrap(
           spacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            ChoiceChip(
-              label: const Text('Music'),
-              selected: !documents,
-              onSelected: loading
-                  ? null
-                  : (_) {
-                      setState(() {
-                        documents = false;
-                      });
-                      _browse(chat!);
-                    },
+            Text(
+              '${channels.length} channels · ${telegram.connection}',
+              style: const TextStyle(fontSize: 11, color: muted),
             ),
-            ChoiceChip(
-              label: const Text('Audio documents'),
-              selected: documents,
-              onSelected: loading
+            TextButton.icon(
+              onPressed: telegram.busy
                   ? null
-                  : (_) {
-                      setState(() {
-                        documents = true;
-                      });
-                      _browse(chat!);
-                    },
+                  : () => telegram.action(telegram.refreshChats),
+              icon: const Icon(Icons.refresh_rounded, size: 17),
+              label: const Text('Load more'),
+            ),
+            TextButton.icon(
+              onPressed: () => setState(() {
+                search.clear();
+                destination = 0;
+              }),
+              icon: const Icon(Icons.library_music_rounded, size: 17),
+              label: Text(
+                'Open Library (${player.settings.selectedChannels.length})',
+              ),
             ),
           ],
         ),
-        if (browseError != null) _banner(browseError!),
-        if (loading)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 8),
-            child: LinearProgressIndicator(minHeight: 2),
-          ),
+        if (telegram.error != null) _banner(telegram.error!),
+        if (library.error != null) _banner(library.error!),
         Expanded(
-          child: telegramTracks.isEmpty && !loading
+          child: channels.isEmpty
               ? _empty(
-                  Icons.music_off_rounded,
-                  'No audio in this page',
-                  'Try Audio documents, or load older messages.',
+                  Icons.campaign_outlined,
+                  'No channels to show',
+                  'Join a channel in Telegram, then load your channels here.',
                 )
-              : _trackList(telegramTracks),
+              : ListView.builder(
+                  itemCount: channels.length,
+                  itemBuilder: (context, i) => CheckboxListTile(
+                    value: library.selected(channels[i].id),
+                    onChanged: library.saving
+                        ? null
+                        : (value) => unawaited(
+                            library.select(channels[i], value ?? false),
+                          ),
+                    controlAffinity: ListTileControlAffinity.trailing,
+                    secondary: SizedBox(
+                      width: 40,
+                      height: 40,
+                      child: ClipOval(
+                        child: Artwork(
+                          seed: channels[i].title,
+                          small: true,
+                          telegram: telegram,
+                          fileId: channels[i].photoFileId,
+                        ),
+                      ),
+                    ),
+                    title: Text(
+                      channels[i].title,
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                    subtitle: Text(
+                      library.selected(channels[i].id)
+                          ? 'Selected for Library'
+                          : 'Add music to Library',
+                      style: const TextStyle(color: muted, fontSize: 11),
+                    ),
+                  ),
+                ),
         ),
-        if (cursor != 0)
-          TextButton(
-            onPressed: loading ? null : () => _browse(chat!, more: true),
-            child: const Text('Load older audio'),
-          ),
       ],
     );
   }
@@ -786,7 +706,7 @@ class _PlayerShellState extends State<PlayerShell> {
             ),
             const SizedBox(height: 10),
             const Text(
-              'Connect Telegram to browse music shared in chats you can access. Audio stays on your device.',
+              'Connect Telegram to browse music shared in channels you can access. Audio stays on your device.',
               textAlign: TextAlign.center,
               style: TextStyle(color: muted, height: 1.6, fontSize: 12),
             ),
@@ -831,7 +751,7 @@ class _PlayerShellState extends State<PlayerShell> {
             ? _empty(
                 Icons.queue_music_rounded,
                 'A little more of what you love',
-                'Add tracks from your library or Telegram to build a queue.',
+                'Add tracks from your Library to build a queue.',
               )
             : ReorderableListView.builder(
                 itemCount: player.queue.length,
@@ -866,7 +786,11 @@ class _PlayerShellState extends State<PlayerShell> {
               constraints: BoxConstraints(maxWidth: compact ? 260 : 330),
               child: AspectRatio(
                 aspectRatio: 1,
-                child: Artwork(seed: track?.title ?? 'Auralis'),
+                child: Artwork(
+                  seed: track?.title ?? 'Auralis',
+                  telegram: telegram,
+                  fileId: track?.coverFileId,
+                ),
               ),
             ),
           ),
@@ -889,12 +813,7 @@ class _PlayerShellState extends State<PlayerShell> {
           const SizedBox(height: 16),
           Center(
             child: Chip(
-              avatar: Icon(
-                track?.fileId == null
-                    ? Icons.folder_outlined
-                    : Icons.send_rounded,
-                size: 14,
-              ),
+              avatar: Icon(Icons.send_rounded, size: 14),
               label: Text(
                 track?.source ?? 'Nothing playing',
                 style: const TextStyle(fontSize: 10),
@@ -1063,6 +982,8 @@ class _PlayerShellState extends State<PlayerShell> {
                 child: Artwork(
                   seed: player.current?.title ?? 'Auralis',
                   small: true,
+                  telegram: telegram,
+                  fileId: player.current?.coverFileId,
                 ),
               ),
               const SizedBox(width: 12),
@@ -1186,7 +1107,7 @@ class _PlayerShellState extends State<PlayerShell> {
                   const Divider(),
                 ],
                 Text(
-                  'Auralis ${widget.updater?.currentVersion ?? '0.1.0'} · AGPL-3.0-or-later\nIndependent Flutter interface. Playback by libmpv. Telegram connectivity by TDLib.',
+                  'Auralis ${widget.updater?.currentVersion ?? '0.1.3'} · AGPL-3.0-or-later\nIndependent Flutter interface. Playback by libmpv. Telegram connectivity by TDLib.',
                   style: const TextStyle(
                     color: muted,
                     fontSize: 12,
@@ -1211,7 +1132,7 @@ class _PlayerShellState extends State<PlayerShell> {
             onPressed: () => showLicensePage(
               context: context,
               applicationName: 'Auralis',
-              applicationVersion: widget.updater?.currentVersion ?? '0.1.0',
+              applicationVersion: widget.updater?.currentVersion ?? '0.1.3',
             ),
             child: const Text('Licenses'),
           ),
@@ -1347,19 +1268,50 @@ class _AuthFormState extends State<AuthForm> {
   }
 }
 
-/// Original procedural artwork; no upstream assets or album covers.
+/// Telegram artwork with an original procedural fallback.
 class Artwork extends StatelessWidget {
-  const Artwork({super.key, required this.seed, this.small = false});
+  const Artwork({
+    super.key,
+    required this.seed,
+    this.small = false,
+    this.telegram,
+    this.fileId,
+  });
   final String seed;
   final bool small;
+  final TelegramService? telegram;
+  final int? fileId;
   @override
-  Widget build(BuildContext context) => ClipRRect(
-    borderRadius: BorderRadius.circular(small ? 12 : 30),
-    child: CustomPaint(
+  Widget build(BuildContext context) {
+    final fallback = CustomPaint(
       painter: _RecordPainter(seed),
       child: const SizedBox.expand(),
-    ),
-  );
+    );
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(small ? 12 : 30),
+      child: fileId == null || telegram == null
+          ? fallback
+          : FutureBuilder<String?>(
+              key: ValueKey(fileId),
+              future: telegram!.image(fileId!),
+              builder: (context, snapshot) {
+                return snapshot.data == null ||
+                        snapshot.connectionState != ConnectionState.done
+                    ? fallback
+                    : Image.file(
+                        File(snapshot.data!),
+                        fit: BoxFit.cover,
+                        width: double.infinity,
+                        height: double.infinity,
+                        cacheWidth: small ? 96 : 640,
+                        errorBuilder: (context, error, stack) => fallback,
+                        frameBuilder: (context, child, frame, synchronous) =>
+                            frame == null ? fallback : child,
+                      );
+              },
+            ),
+    );
+  }
 }
 
 class _RecordPainter extends CustomPainter {
