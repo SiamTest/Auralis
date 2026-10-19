@@ -27,6 +27,171 @@ void main() {
     )..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'))).load();
   });
   testWidgets(
+    'select two channels, play their combined Library with covers, and deselect a source',
+    (tester) async {
+      late Directory dir;
+      final td = FakeTd();
+      late TelegramService telegram;
+      await tester.runAsync(() async {
+        dir = await Directory.systemTemp.createTemp('auralis-ui-channels-');
+        telegram = TelegramService(dir, MemoryVault(), transport: td);
+        await telegram.start(
+          apiId: 12345,
+          apiHash: 'abcdef0123456789abcdef0123456789',
+        );
+      });
+      telegram.state = 'authorizationStateReady';
+      for (final id in [-1, -2]) {
+        td.events.add({
+          '@type': 'updateNewChat',
+          'chat': {
+            'id': id,
+            'title': 'Channel $id',
+            'type': {'@type': 'chatTypeSupergroup', 'is_channel': true},
+            'photo': {
+              'small': {'id': 90},
+            },
+          },
+        });
+      }
+      final photoPath = File('assets/branding/auralis.png').absolute.path;
+      td.onRequest = (r) async {
+        if (r['@type'] == 'downloadFile') {
+          return {
+            'local': {'path': photoPath, 'is_downloading_completed': true},
+          };
+        }
+        if (r['@type'] == 'searchChatMessages') {
+          return {
+            'next_from_message_id': 0,
+            'messages': r['filter']['@type'] == 'searchMessagesFilterDocument'
+                ? []
+                : [
+                    {
+                      'chat_id': r['chat_id'],
+                      'id': 1,
+                      'content': {
+                        '@type': 'messageAudio',
+                        'audio': {
+                          'title': 'Song ${r['chat_id']}',
+                          'performer': 'Artist',
+                          'file_name': 'song.mp3',
+                          'album_cover_thumbnail': {
+                            'file': {'id': 90},
+                          },
+                          'audio': {'id': 1, 'size': 100},
+                        },
+                      },
+                    },
+                  ],
+          };
+        }
+        return null;
+      };
+      final audio = FakeAudio();
+      final player = PlayerController(
+        audio,
+        TelegramStreamProxy((_) async => {}),
+        MemorySettings(),
+      );
+      addTearDown(() async {
+        await player.shutdown();
+        await telegram.shutdown();
+        await dir.delete(recursive: true);
+      });
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1280, 800);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final boundary = GlobalKey();
+      await tester.pumpWidget(
+        RepaintBoundary(
+          key: boundary,
+          child: AuralisApp(player: player, telegram: telegram),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Choose your music channels'), findsOneWidget);
+      // The original app icon is a local image fixture, not real channel/album artwork.
+      await tester.runAsync(() async {
+        expect(await telegram.image(90), photoPath);
+        final context = tester.element(find.byType(MaterialApp));
+        await precacheImage(
+          ResizeImage(FileImage(File(photoPath)), width: 96),
+          context,
+        );
+        if (!context.mounted) return;
+        await precacheImage(
+          ResizeImage(FileImage(File(photoPath)), width: 640),
+          context,
+        );
+      });
+      await tester.tap(find.byTooltip('Telegram').first);
+      await tester.pump();
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      await tester.pumpAndSettle();
+      expect(telegram.channels.map((c) => c.photoFileId), [90, 90]);
+      expect(find.byType(Image), findsNWidgets(2));
+      await tester.tap(find.text('Channel -1'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Channel -2'));
+      await tester.pumpAndSettle();
+      expect(player.settings.selectedChannels, hasLength(2));
+      await tester.tap(find.text('Open Library (2)'));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Add Song -1 to queue'), findsOneWidget);
+      expect(find.byTooltip('Add Song -2 to queue'), findsOneWidget);
+      expect(find.text('Choose audio files'), findsNothing);
+      await tester.enterText(find.byType(TextField).first, 'Channel -2');
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Add Song -1 to queue'), findsNothing);
+      expect(find.byTooltip('Add Song -2 to queue'), findsOneWidget);
+      await tester.tap(find.byTooltip('Clear search'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Add Song -1 to queue'));
+      await tester.runAsync(() => player.playAt(0));
+      await tester.pump();
+      await tester.runAsync(() async {
+        await telegram.image(90);
+      });
+      await tester.pumpAndSettle();
+      expect(audio.uri, startsWith('http://127.0.0.1:'));
+      expect(player.current?.title, 'Song -1');
+      expect(find.byType(Image), findsNWidgets(4));
+      expect(tester.takeException(), isNull);
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+      final render =
+          boundary.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+      await tester.runAsync(() async {
+        final image = await render.toImage();
+        final data = await image.toByteData(format: ui.ImageByteFormat.png);
+        await File('docs/screenshots/channel-library.png')
+            .writeAsBytes(data!.buffer.asUint8List());
+        image.dispose();
+      });
+      for (final size in [const Size(760, 650), const Size(520, 560)]) {
+        tester.view.physicalSize = size;
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        await tester.tap(find.byTooltip('Telegram').first);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        await tester.tap(find.byTooltip('Library').first);
+        await tester.pumpAndSettle();
+      }
+      await tester.tap(find.byTooltip('Telegram').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Channel -1').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Open Library (1)'));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Add Song -1 to queue'), findsNothing);
+      expect(find.byTooltip('Add Song -2 to queue'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+  testWidgets(
     'responsive library, queue, Telegram, now playing and settings have no layout errors',
     (tester) async {
       final audio = FakeAudio();
@@ -65,7 +230,9 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(find.text('Make room for your music'), findsOneWidget);
+        expect(find.text('Connect Telegram for your music'), findsOneWidget);
+        expect(find.text('Choose audio files'), findsNothing);
+        expect(find.text('Add music'), findsNothing);
         expect(tester.takeException(), isNull);
         if (size.width == 1280) {
           final render =
@@ -84,6 +251,16 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('Telegram API ID'), findsOneWidget);
         expect(tester.takeException(), isNull);
+        await telegram.action(() async {
+          telegram.state = 'authorizationStateReady';
+        });
+        await tester.pumpAndSettle();
+        expect(find.text('Find an accessible channel'), findsOneWidget);
+        expect(find.text('0 channels · Offline'), findsOneWidget);
+        expect(find.text('No channels to show'), findsOneWidget);
+        expect(find.text('MUSIC IN YOUR CHANNELS'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        telegram.state = 'disconnected';
         await tester.tap(find.byTooltip('Play queue').first);
         await tester.pumpAndSettle();
         expect(find.text('A little more of what you love'), findsOneWidget);
