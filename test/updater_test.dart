@@ -295,6 +295,45 @@ void main() {
     expect(limited.checking, isFalse);
   });
   test(
+    'launch and cleanup failures offer manual recovery and stop the helper',
+    () async {
+      for (final duringCleanup in [false, true]) {
+        final helper = Helper();
+        var exitCalled = false;
+        final updates = updater(
+          Client([metadata(), Response(installerBytes)]),
+          launch: (_, _, _) async {
+            if (!duringCleanup) {
+              throw const ProcessException(
+                'powershell.exe',
+                [],
+                'test launch failure',
+                5,
+              );
+            }
+            return helper;
+          },
+          exit: () async {
+            exitCalled = true;
+            throw StateError('test cleanup failed');
+          },
+        );
+        await updates.check();
+        await updates.download();
+        await updates.install();
+        expect(
+          updates.error,
+          contains(duringCleanup ? 'finish closing' : 'installer helper'),
+        );
+        expect(updates.error, contains('manually'));
+        expect(updates.downloaded, isNotNull);
+        expect(updates.installing, isFalse);
+        expect(exitCalled, duringCleanup);
+        expect(helper.killed, duringCleanup);
+      }
+    },
+  );
+  test(
     'redirects allow GitHub CDN over HTTPS and reject an arbitrary host',
     () async {
       final good = updater(
