@@ -8,7 +8,7 @@ An independently authored Flutter desktop player with a compact violet/charcoal 
 
 **Source milestone, not yet a verified installable Windows release.** Flutter analysis and automated tests ran on Windows 11 x64. Real TDLib initialization/shutdown, Windows DPAPI, libmpv decoding/playback/seeking, and playback through the loopback proxy were exercised separately. See [verification](docs/VERIFICATION.md) for exact results and limits.
 
-The local executable build is blocked: Visual Studio C++ Build Tools are absent. Microsoft's signed installer exited with code 1602 after Windows elevation was unavailable/declined. No EXE, portable binary bundle, signed package, or installer is included. The first GitHub Actions run built TDLib and the Flutter Windows app, then crashed in libmpv during smoke-test shutdown before packaging. This source includes a Windows shutdown fix and stronger native regression checks; the fixed revision still needs a GitHub Actions run. See [shutdown fix](docs/NATIVE_SHUTDOWN_FIX.md).
+The local executable build is blocked: Visual Studio C++ Build Tools are absent. Microsoft's signed installer exited with code 1602 after Windows elevation was unavailable/declined. No EXE, portable binary bundle, signed package, or installer is included. GitHub Actions built TDLib and the Flutter Windows app, then crashed in libmpv during smoke-test shutdown. A first callback-lifetime patch was insufficient: a subsequent trace still crashed in WASAPI device-monitor cleanup. The current vendored runtime adds Windows COM lifetime retention until complete native destruction and passes local native checks; this revision still needs a GitHub Actions run. See [shutdown fix](docs/NATIVE_SHUTDOWN_FIX.md).
 
 Implemented:
 
@@ -33,7 +33,7 @@ Not implemented or not verified:
 
 Use **Windows x64**, Flutter **3.47.1** / Dart **3.13.1**, Git, PowerShell **7.4+**, CMake, and **Visual Studio 2022** (or Build Tools 2022) with **Desktop development with C++**, the MSVC x64 toolset, and Windows SDK. Install these tools using their official installers, then check `flutter doctor -v`.
 
-Pinned Dart dependencies and their transitive versions are in `pubspec.yaml` and `pubspec.lock`: Flutter, media_kit 1.2.6+auralis.1 (vendored MIT runtime with a Windows shutdown patch), media_kit_libs_windows_audio 1.0.9, ffi 2.2.0, file_selector 1.1.0, path 1.9.1, path_provider 2.1.6, package_info_plus 10.2.1, and crypto 3.0.7. TDLib is built separately; no third-party Dart Telegram wrapper is used. Keep `third_party/media_kit` in Git with the app; its patch and original license are included there.
+Pinned Dart dependencies and their transitive versions are in `pubspec.yaml` and `pubspec.lock`: Flutter, media_kit 1.2.6+auralis.2 (vendored MIT runtime with Windows COM/shutdown patches), media_kit_libs_windows_audio 1.0.9, ffi 2.2.0, file_selector 1.1.0, path 1.9.1, path_provider 2.1.6, package_info_plus 10.2.1, and crypto 3.0.7. TDLib is built separately; no third-party Dart Telegram wrapper is used. Keep `third_party/media_kit` in Git with the app; its patch and original license are included there.
 
 From this directory:
 
@@ -50,6 +50,8 @@ pwsh ./tool/package.ps1
 ```
 
 TDLib's first build can take a long time and several GB of disk space. The script pins TDLib and vcpkg revisions, builds OpenSSL/zlib/gperf through vcpkg, and builds `tdjson.dll` with MSVC. Start with two parallel compiler jobs to limit memory use. It writes only its generated `.native-build/` tree, `native/` binaries, license texts, and build manifest. Neither upstream player is cloned or modified.
+
+GitHub Actions caches the compiled TDLib DLLs, dependency DLLs, license files and build manifest immediately after a successful TDLib build. An exact cache hit skips native compilation. The key includes the Windows runner image version and hashes of the build script and workflow, so changing pinned revisions, build settings or the runner image starts a fresh build. The first run, an expired/evicted cache or a changed key still requires compilation. See [cache details](docs/UPDATES.md#tdlib-build-cache).
 
 Run the app with `flutter run -d windows` after native setup, or launch `build/windows/x64/runner/Release/auralis.exe`. Keep **the entire Release directory** together. The executable depends on Flutter's DLL/data files, `libmpv-2.dll`, and `native/tdjson.dll` plus its dependent DLLs. End-user machines also need the Microsoft Visual C++ 2015–2022 x64 runtime. The optional installer currently assumes it is installed.
 
