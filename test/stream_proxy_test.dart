@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:auralis/models.dart';
 import 'package:auralis/telegram/stream_proxy.dart';
@@ -104,74 +105,103 @@ void main() {
     }
   });
 
-  test('real HTTP serves buffered byte ranges, HEAD and rejects unknown capability', () async {
-    final bytes = List.generate(600000, (i) => i % 251);
-    var waits = 0;
-    final calls = <Map<String, dynamic>>[];
-    final proxy = TelegramStreamProxy((json) async {
-      calls.add(json);
-      switch (json['@type']) {
-        case 'downloadFile':
-          return {'@type': 'file'};
-        case 'getFileDownloadedPrefixSize':
-          if (waits++ == 0) return {'size': 0};
-          return {'size': bytes.length - (json['offset'] as int)};
-        case 'readFilePart':
-          final offset = json['offset'] as int, count = json['count'] as int;
-          return {'data': base64Encode(bytes.sublist(offset, offset + count))};
-        default:
-          throw StateError('Unexpected request');
-      }
-    });
-    final client = HttpClient();
-    addTearDown(() async {
-      client.close(force: true);
-      await proxy.close();
-    });
-    final uri = await proxy.uri(
-      Track(
-        id: 'a',
-        title: 'A',
-        artist: 'B',
-        source: 'Chat',
-        fileId: 12,
-        size: bytes.length,
-        mime: 'audio/mpeg',
-      ),
-    );
-    final get = await client.getUrl(uri);
-    get.headers.set('Range', 'bytes=100-350000');
-    final response = await get.close();
-    expect(response.statusCode, 206);
-    expect(response.headers.value('Content-Range'), 'bytes 100-350000/600000');
-    final actual = await response.fold<List<int>>(
-      [],
-      (previous, chunk) => previous..addAll(chunk),
-    );
-    expect(actual, bytes.sublist(100, 350001));
-    expect(waits, greaterThan(1));
-    expect(calls.first['offset'], 100);
-    final head = await client.openUrl('HEAD', uri);
-    final headResponse = await head.close();
-    expect(headResponse.contentLength, bytes.length);
-    await headResponse.drain<void>();
-    final bad = await client.getUrl(uri.replace(path: '/wrong/1'));
-    final badResponse = await bad.close();
-    expect(badResponse.statusCode, 403);
-    await badResponse.drain<void>();
-    final invalid = await client.getUrl(uri);
-    invalid.headers.set('Range', 'bytes=999999-');
-    final invalidResponse = await invalid.close();
-    expect(invalidResponse.statusCode, 416);
-    await invalidResponse.drain<void>();
-    final suffix = await client.getUrl(uri);
-    suffix.headers.set('Range', 'bytes=-20');
-    final suffixResponse = await suffix.close();
-    expect(
-      await suffixResponse.fold<List<int>>([], (a, b) => a..addAll(b)),
-      bytes.sublist(bytes.length - 20),
-    );
-  });
+  test(
+    'original file bytes survive full streaming, buffering and seek ranges',
+    () async {
+      final bytes = List.generate(600000, (i) => i % 251);
+      var waits = 0;
+      final calls = <Map<String, dynamic>>[];
+      final proxy = TelegramStreamProxy((json) async {
+        calls.add(json);
+        switch (json['@type']) {
+          case 'downloadFile':
+            return {'@type': 'file'};
+          case 'getFileDownloadedPrefixSize':
+            if (waits++ == 0) return {'size': 0};
+            return {'size': bytes.length - (json['offset'] as int)};
+          case 'readFilePart':
+            final offset = json['offset'] as int, count = json['count'] as int;
+            return {
+              'data': base64Encode(bytes.sublist(offset, offset + count)),
+            };
+          default:
+            throw StateError('Unexpected request');
+        }
+      });
+      final client = HttpClient();
+      addTearDown(() async {
+        client.close(force: true);
+        await proxy.close();
+      });
+      final uri = await proxy.uri(
+        Track(
+          id: 'a',
+          title: 'A',
+          artist: 'B',
+          source: 'Chat',
+          fileId: 12,
+          size: bytes.length,
+          mime: 'audio/mpeg',
+        ),
+      );
+      final full = await (await client.getUrl(uri)).close();
+      expect(full.statusCode, 200);
+      expect(full.contentLength, bytes.length);
+      expect(full.headers.contentType?.mimeType, 'audio/mpeg');
+      final streamed = await full.fold<List<int>>(
+        [],
+        (previous, chunk) => previous..addAll(chunk),
+      );
+      expect(streamed.length, bytes.length);
+      expect(sha256.convert(streamed), sha256.convert(bytes));
+      expect(
+        calls.where((c) => c['@type'] == 'readFilePart').length,
+        greaterThan(1),
+      );
+      expect(calls.first['offset'], 0);
+      expect(calls.first['limit'], bytes.length);
+      final get = await client.getUrl(uri);
+      get.headers.set('Range', 'bytes=100-350000');
+      final response = await get.close();
+      expect(response.statusCode, 206);
+      expect(
+        response.headers.value('Content-Range'),
+        'bytes 100-350000/600000',
+      );
+      final actual = await response.fold<List<int>>(
+        [],
+        (previous, chunk) => previous..addAll(chunk),
+      );
+      expect(actual, bytes.sublist(100, 350001));
+      expect(waits, greaterThan(1));
+      final downloads = calls
+          .where((c) => c['@type'] == 'downloadFile')
+          .toList();
+      expect(downloads.last['offset'], 100);
+      expect(downloads.last['limit'], 349901);
+      final head = await client.openUrl('HEAD', uri);
+      final headResponse = await head.close();
+      expect(headResponse.contentLength, bytes.length);
+      await headResponse.drain<void>();
+      final bad = await client.getUrl(uri.replace(path: '/wrong/1'));
+      final badResponse = await bad.close();
+      expect(badResponse.statusCode, 403);
+      await badResponse.drain<void>();
+      final invalid = await client.getUrl(uri);
+      invalid.headers.set('Range', 'bytes=999999-');
+      final invalidResponse = await invalid.close();
+      expect(invalidResponse.statusCode, 416);
+      await invalidResponse.drain<void>();
+      final suffix = await client.getUrl(uri);
+      suffix.headers.set('Range', 'bytes=-20');
+      final suffixResponse = await suffix.close();
+      expect(
+        await suffixResponse.fold<List<int>>([], (a, b) => a..addAll(b)),
+        bytes.sublist(bytes.length - 20),
+      );
+      expect(calls.every((c) => c['file_id'] == 12), isTrue);
+    },
+  );
 
   test(
     'a stalled Telegram download reports an error and terminates the request',
