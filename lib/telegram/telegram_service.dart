@@ -19,11 +19,51 @@ class TelegramService extends ChangeNotifier {
   String state = 'disconnected';
   String? error;
   bool busy = false;
-  final Map<int, MusicChat> _chats = {};
-  List<MusicChat> get chats => _chats.values.toList()
+  final Map<int, MusicChat> _channels = {};
+  List<MusicChat> get channels => _channels.values.toList()
     ..sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
   bool get ready => state == 'authorizationStateReady';
   String connection = 'Offline';
+  final Map<int, Future<String?>> _images = {};
+  int _imageGeneration = 0;
+
+  void clearImageCache() {
+    ++_imageGeneration;
+    _images.clear();
+  }
+
+  Future<String?> image(int fileId) {
+    if (!ready) return Future.value(null);
+    if (_images[fileId] case final cached?) return cached;
+    if (_images.length >= 128) _images.remove(_images.keys.first);
+    return _images[fileId] = _downloadImage(fileId, _imageGeneration);
+  }
+
+  Future<String?> _downloadImage(int fileId, int generation) async {
+    try {
+      final result = await transport.request({
+        '@type': 'downloadFile',
+        'file_id': fileId,
+        'priority': 1,
+        'offset': 0,
+        'limit': 0,
+        'synchronous': true,
+      }, timeout: const Duration(seconds: 20));
+      final local = result['local'] as Json?;
+      final path = local?['path'] as String?;
+      if (local?['is_downloading_completed'] == true &&
+          path != null &&
+          path.isNotEmpty &&
+          await File(path).exists() &&
+          generation == _imageGeneration &&
+          ready) {
+        return path;
+      }
+    } catch (_) {
+      // Artwork failure must not interrupt music playback or channel selection.
+    }
+    return null;
+  }
 
   Future<void> start({int? apiId, String? apiHash}) async {
     await action(() async {
@@ -66,15 +106,34 @@ class TelegramService extends ChangeNotifier {
         );
       case 'updateNewChat':
         final chat = json['chat'] as Json;
-        _chats[chat['id'] as int] = MusicChat(
-          chat['id'] as int,
-          chat['title'] as String,
-        );
+        final id = chat['id'] as int;
+        final channel = MusicChat.fromChat(chat);
+        if (channel != null) {
+          _channels[id] = channel;
+        } else {
+          _channels.remove(id);
+        }
         notifyListeners();
       case 'updateChatTitle':
         final id = json['chat_id'] as int;
-        _chats[id] = MusicChat(id, json['title'] as String);
-        notifyListeners();
+        if (_channels.containsKey(id)) {
+          _channels[id] = MusicChat(
+            id,
+            json['title'] as String,
+            photoFileId: _channels[id]!.photoFileId,
+          );
+          notifyListeners();
+        }
+      case 'updateChatPhoto':
+        final id = json['chat_id'] as int;
+        if (_channels[id] case final channel?) {
+          _channels[id] = MusicChat(
+            id,
+            channel.title,
+            photoFileId: json['photo']?['small']?['id'] as int?,
+          );
+          notifyListeners();
+        }
       case 'updateConnectionState':
         connection = switch (json['state']?['@type']) {
           'connectionStateReady' => 'Connected',
@@ -89,6 +148,13 @@ class TelegramService extends ChangeNotifier {
   bool _parametersSent = false;
   Future<void> _onAuthorization(Json auth) async {
     state = auth['@type'] as String;
+    if (!ready) {
+      clearImageCache();
+      if (state == 'authorizationStateLoggingOut' ||
+          state == 'authorizationStateClosed') {
+        _channels.clear();
+      }
+    }
     error = null;
     notifyListeners();
     if (state == 'authorizationStateWaitTdlibParameters' && !_parametersSent) {
@@ -109,7 +175,7 @@ class TelegramService extends ChangeNotifier {
           'system_language_code': 'en',
           'device_model': 'Auralis Windows x64',
           'system_version': 'Windows',
-          'application_version': '0.1.0',
+          'application_version': '0.1.3',
         });
       } catch (_) {
         _parametersSent = false;
@@ -169,7 +235,19 @@ class TelegramService extends ChangeNotifier {
     }
   }
 
-  Future<List<Track>> music(
+  Future<MusicChat?> channel(int id) async {
+    if (_channels[id] case final known?) return known;
+    final channel = MusicChat.fromChat(
+      await transport.request({'@type': 'getChat', 'chat_id': id}),
+    );
+    if (channel != null) {
+      _channels[id] = channel;
+      notifyListeners();
+    }
+    return channel;
+  }
+
+  Future<({List<Track> tracks, int nextMessageId})> music(
     int chatId,
     String title, {
     int before = 0,
@@ -190,18 +268,18 @@ class TelegramService extends ChangeNotifier {
             : 'searchMessagesFilterAudio',
       },
     });
-    nextMessageId = (result['next_from_message_id'] as int?) ?? 0;
-    return (result['messages'] as List)
-        .map((m) => Track.fromMessage(m as Json, title))
-        .whereType<Track>()
-        .toList();
+    return (
+      tracks: (result['messages'] as List)
+          .map((m) => Track.fromMessage(m as Json, title))
+          .whereType<Track>()
+          .toList(),
+      nextMessageId: (result['next_from_message_id'] as int?) ?? 0,
+    );
   }
-
-  int nextMessageId = 0;
 
   Future<void> logout() => action(() async {
     await transport.request({'@type': 'logOut'});
-    _chats.clear();
+    _channels.clear();
   });
 
   Future<void> action(Future<void> Function() operation) async {
@@ -226,6 +304,8 @@ class TelegramService extends ChangeNotifier {
   }
 
   Future<void> shutdown() async {
+    state = 'disconnected';
+    clearImageCache();
     await _subscription?.cancel();
     await transport.close();
   }
