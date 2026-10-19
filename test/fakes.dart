@@ -7,6 +7,7 @@ import 'package:auralis/telegram/td_transport.dart';
 
 class FakeAudio extends AudioBackend {
   String? uri;
+  final volumes = <double>[];
   @override
   Future<void> open(String uri) async {
     this.uri = uri;
@@ -27,7 +28,10 @@ class FakeAudio extends AudioBackend {
   }
 
   @override
-  Future<void> volume(double value) async {}
+  Future<void> volume(double value) async {
+    volumes.add(value);
+  }
+
   @override
   Future<void> stop() async {
     playing = false;
