@@ -56,6 +56,8 @@ class TelegramStreamProxy {
   int _sequence = 0;
   int _sourceGeneration = 0;
   bool _closing = false;
+  bool isStreaming(int fileId) =>
+      _tracks.values.any((track) => track.fileId == fileId);
 
   Future<Uri> uri(Track track) async {
     if (track.fileId == null || track.size <= 0) {
