@@ -1,25 +1,27 @@
 # Auralis — Windows x64 music player
 
-An independently authored Flutter desktop player with a compact violet/charcoal interface, local music, a queue, and TDLib-based Telegram music browsing. Design references: [mpvRx](https://github.com/Riteshp2001/mpvRx); Telegram feature reference: [PixelPlayer](https://github.com/PixelPlayerHQ/PixelPlayer). This is a separate project, with no upstream application code, branding, screenshots, icons, or other assets copied.
+An independently authored Flutter desktop player with a compact violet/charcoal interface, a Library combining music from selected Telegram channels, and a playback queue. Design references: [mpvRx](https://github.com/Riteshp2001/mpvRx); Telegram feature reference: [PixelPlayer](https://github.com/PixelPlayerHQ/PixelPlayer). This is a separate project, with no upstream application code, branding, screenshots, icons, or other assets copied.
 
 ![Test-rendered library](docs/screenshots/library.png)
 
 ## Milestone status
 
-**Source milestone, not yet a verified installable Windows release.** Flutter analysis and automated tests ran on Windows 11 x64. Real TDLib initialization/shutdown, Windows DPAPI, libmpv decoding/playback/seeking, and playback through the loopback proxy were exercised separately. See [verification](docs/VERIFICATION.md) for exact results and limits.
+**CI-built Windows milestone; installation and live Telegram playback remain unverified.** [GitHub run 39232305284](https://github.com/SiamTest/Auralis/actions/runs/39232305284) passed analysis/tests, TDLib and Flutter compilation, native smoke tests and installer packaging. Local native checks also passed. See [verification](docs/VERIFICATION.md) for exact results and limits.
 
-The local executable build is blocked: Visual Studio C++ Build Tools are absent. Microsoft's signed installer exited with code 1602 after Windows elevation was unavailable/declined. No EXE, portable binary bundle, signed package, or installer is included. GitHub Actions built TDLib and the Flutter Windows app, then crashed in libmpv during smoke-test shutdown. A first callback-lifetime patch was insufficient: a subsequent trace still crashed in WASAPI device-monitor cleanup. The current vendored runtime adds Windows COM lifetime retention until complete native destruction and passes local native checks; this revision still needs a GitHub Actions run. See [shutdown fix](docs/NATIVE_SHUTDOWN_FIX.md).
+The local executable build is blocked because Visual Studio C++ Build Tools are absent. The source ZIP contains no EXE or installer; the successful GitHub run has downloadable Windows artifacts for an earlier revision. Earlier shutdown failures led to the Windows COM lifetime fix, which passed the actual GitHub native smoke test. Current version `0.1.3+4` adds the selected-channel Library and Telegram artwork; its local tests pass, but this revision has not been built on GitHub here. Stable publishing has local fixture coverage and still needs GitHub verification. See [shutdown fix](docs/NATIVE_SHUTDOWN_FIX.md).
 
 Implemented:
 
-- Responsive library, queue, and now-playing pages; persistent volume, local file references, and reduced-motion preference. Import multiple audio files; search loaded titles/artists. Original procedural artwork replaces missing album covers.
-- Queue add, reorder, shuffle upcoming tracks, previous/next, repeat queue, play/pause, seek bar and volume. Ctrl+O imports files; media keys work while the app has keyboard focus. No global media-key registration.
+- Original violet A/play app icon, with Windows taskbar/executable, Start menu and installer branding. Editable artwork is in [assets/branding](assets/branding/README.md). Version `0.1.1+2` carries the icon replacement; rebuild and reinstall to apply it. If a previously pinned shortcut retains Flutter's cached icon, unpin it and pin the newly installed Auralis executable again.
+- Responsive Library, queue, and now-playing pages; persistent channel selections, volume and reduced-motion preference. Select one or more channels in Telegram, then search their combined Library by title, artist or channel. Local-file importing/playback is removed; old local-path preferences are ignored without deleting audio files.
+- Telegram-provided music covers in Library, queue, Now Playing and the player bar, plus channel photos beside channel selection. Images load on display at low download priority with a bounded 128-entry request cache; missing/failed images use original procedural artwork. No external artwork search is used. See [artwork limits](#telegram-artwork).
+- Queue add, reorder, shuffle upcoming tracks, previous/next, repeat queue, play/pause, seek bar and volume. Media keys work while the app has keyboard focus. No global media-key registration.
 - TDLib JSON bridge on a dedicated isolate; request correlation, timeouts, ordered updates, and graceful close. Phone, login code, and 2FA forms, plus email verification forms when Telegram requests them.
-- Main and archived accessible chats, incremental chat loading, paginated audio-message browsing, and a separate audio-document filter. Browsing does not join channels or bypass permissions.
+- Main and archived accessible channels only, with selection checkboxes. The Library automatically follows every older audio/document page from each selected channel, ignores non-audio documents, deduplicates messages and shows progress/partial errors. Changing selection or signing out invalidates pending results. Private chats, bots, basic groups and non-channel supergroups are excluded, including after title/photo updates. Browsing does not join channels or bypass permissions.
 - Private loopback HTTP endpoint with an unpredictable capability URL; full/partial/suffix byte ranges, HEAD, download-prefix checks, buffered reads, range cancellation and stalled-download errors. Native seeking may be served from libmpv's buffer or trigger another TDLib range.
 - Windows DPAPI-encrypted API credentials and random TDLib database encryption key. Codes, phone numbers, and 2FA passwords are not saved by Auralis. Native diagnostic logging is suppressed. Runtime data and native DLLs are ignored by Git.
 - Automatic stable-release update checks, verified installer downloads, and user-confirmed install/restart, configured for [SiamTest/Auralis](https://github.com/SiamTest/Auralis). Settings includes a manual check and an automatic-check preference. See [update/release instructions](docs/UPDATES.md).
-- Automated tests, Windows build workflow, versioned ZIP/source/installer packaging, and tag-triggered automatic GitHub Releases with checksum verification.
+- Automated tests, Windows build workflow, versioned ZIP/source/installer packaging, and automatic stable GitHub Releases from successful `main` builds or matching version tags, with checksum verification.
 
 Not implemented or not verified:
 
@@ -29,11 +31,17 @@ Not implemented or not verified:
 - No cache-size preference or automatic eviction policy yet. TDLib media cache files are plaintext in the user's application-data directory; the database key protects the TDLib database, not downloaded audio. Logout revokes the Telegram session; it does not promise secure deletion of cached media or API application credentials.
 - No fresh-machine installer test, signing certificate, performance profiling, high-DPI hardware audit, screen-reader audit, or public distribution readiness claim. The bundled playback dependency resolves to an older native build; refresh and audit it before production use. See [notices](THIRD_PARTY_NOTICES.md).
 
+## Streaming audio quality
+
+Telegram playback uses the original file ID from the selected message. The streaming proxy passes its file bytes unchanged to libmpv: no re-encoding, lossy conversion, bitrate cap or lower-quality fallback. Download priority, buffering and byte-range seeking affect when bytes arrive, not their encoded quality. A slow download buffers or reports a stalled-transfer error rather than switching to a lower-bitrate copy.
+
+This preserves the quality of the file supplied in Telegram; it does not restore detail already absent from that source. Volume adjustment and the Windows/audio-device output path are separate from file transport. Bit-perfect DAC output or exclusive-mode playback is not implemented or verified. The regression test checks a complete multi-chunk stream's SHA-256 against its simulated original and checks seek ranges exactly; live-account playback remains unverified.
+
 ## Dependencies and build
 
 Use **Windows x64**, Flutter **3.47.1** / Dart **3.13.1**, Git, PowerShell **7.4+**, CMake, and **Visual Studio 2022** (or Build Tools 2022) with **Desktop development with C++**, the MSVC x64 toolset, and Windows SDK. Install these tools using their official installers, then check `flutter doctor -v`.
 
-Pinned Dart dependencies and their transitive versions are in `pubspec.yaml` and `pubspec.lock`: Flutter, media_kit 1.2.6+auralis.2 (vendored MIT runtime with Windows COM/shutdown patches), media_kit_libs_windows_audio 1.0.9, ffi 2.2.0, file_selector 1.1.0, path 1.9.1, path_provider 2.1.6, package_info_plus 10.2.1, and crypto 3.0.7. TDLib is built separately; no third-party Dart Telegram wrapper is used. Keep `third_party/media_kit` in Git with the app; its patch and original license are included there.
+Pinned Dart dependencies and their transitive versions are in `pubspec.yaml` and `pubspec.lock`: Flutter, media_kit 1.2.6+auralis.2 (vendored MIT runtime with Windows COM/shutdown patches), media_kit_libs_windows_audio 1.0.9, ffi 2.2.0, path 1.9.1, path_provider 2.1.6, package_info_plus 10.2.1, and crypto 3.0.7. TDLib is built separately; no third-party Dart Telegram wrapper is used. Keep `third_party/media_kit` in Git with the app; its patch and original license are included there.
 
 From this directory:
 
@@ -57,24 +65,34 @@ Run the app with `flutter run -d windows` after native setup, or launch `build/w
 
 `pwsh ./tool/package.ps1 -Installer` additionally requires Inno Setup 6 and produces an unsigned per-user installer. It requests no administrator privileges and preserves application data during uninstall. Neither packaging mode has been tested with a built executable in this environment.
 
-Packaging derives asset names and the installer version from `pubspec.yaml`. Commit the source first: the source ZIP is produced from Git `HEAD`. Release tags must match the version exactly (for example, `0.1.1+2` → `v0.1.1`). Packaging/tag validation has been tested with harmless fixture files; actual installer compilation/installation is still outstanding.
+Packaging derives asset names and the installer version from `pubspec.yaml`. Commit the source first: the source ZIP is produced from Git `HEAD`. Release tags must match the version exactly (currently `0.1.3+4` → `v0.1.3`). Packaging/tag validation has been tested with harmless fixture files; the current revision's installer compilation/installation is still outstanding.
 
 ## Connect Telegram
 
 1. Create your own application at [my.telegram.org](https://my.telegram.org) and obtain its API ID/hash. Do not use someone else's credentials or commit yours.
 2. Open Telegram in Auralis and enter the application ID/hash locally. Enter your phone number with country code, the code delivered by Telegram, and your 2FA password if requested.
-3. Browse your chats, select a channel/chat, then choose Music or Audio documents. Load older audio to continue pagination. Click a track to play the currently filtered list, or add individual tracks to the queue.
+3. Check the channels you want to include, then choose Open Library. Their music appears together as older audio and audio-document pages load automatically. Use Load more in Telegram to discover more main/archived channels. Your selection is saved and loads again after sign-in on subsequent launches.
+4. In Library, search by title, artist or channel. Click a track to play the filtered list, or add individual tracks to the queue. Use Refresh to scan again for new music, retry partial failures and retry missing artwork. Deselect a channel in Telegram to remove its tracks from Library; already queued/playing tracks stay in the queue until you remove/clear them. Large channels can take time or hit Telegram rate limits; progress and partial errors remain visible.
 
 If a Telegram-specific delivery/verification step is unsupported, the app shows that state. Existing Telegram account membership/access rules apply. This app has no affiliation with Telegram, mpvRx, or PixelPlayer.
 
+## Telegram artwork
+
+Audio messages use the largest supplied Telegram album-cover thumbnail/cover variant; audio documents use their thumbnail when provided. Channel avatars use Telegram's small channel photo and follow photo-change/removal updates. Only images for displayed items are requested, at TDLib priority 1; playback keeps its existing higher-priority original-file stream. Images are decoded at bounded display sizes and cached by Flutter/TDLib. Failed downloads, absent images and image decoding errors fall back to the generated artwork without blocking playback.
+
+This does not extract full-size embedded cover art from music files or look up artwork online. If Telegram provides no cover thumbnail, the placeholder remains. Thumbnail resolution may be lower than the source file's embedded art; music bytes and quality remain unchanged. Telegram's downloaded image/media cache is plaintext in the application-data folder, like its audio cache. The additional UI preview below uses the original Auralis icon as a local image fixture, not real channel or album photos.
+
+![Selected-channel Library with fixture covers](docs/screenshots/channel-library.png)
+
 ## Storage and architecture
 
-Windows application support data is resolved by `path_provider`, using the runner's company/product metadata. The app creates `settings.json`, `credentials.dpapi`, `session.lock`, and `telegram/database` plus `telegram/cache` there. The session lock prevents two Auralis processes from opening the same account database. Settings contain local paths, never login secrets. DPAPI vaults cannot be copied to another Windows user/machine and decrypted there. Secrets necessarily exist in process memory while being used; Dart strings cannot guarantee memory zeroization.
+Windows application support data is resolved by `path_provider`, using the runner's company/product metadata. The app creates `settings.json`, `credentials.dpapi`, `session.lock`, and `telegram/database` plus `telegram/cache` there. The session lock prevents two Auralis processes from opening the same account database. Settings contain selected channel IDs/titles and preferences, never login secrets. Old local-file references are ignored and removed on the next settings save; source files are untouched. Channel selection remains a preference after sign-out, but music is cleared until connected and channels are checked through TDLib before indexing. Track metadata is rebuilt after launch rather than stored as a second persistent database. DPAPI vaults cannot be copied to another Windows user/machine and decrypted there. Secrets necessarily exist in process memory while being used; Dart strings cannot guarantee memory zeroization.
 
-- `lib/app.dart`: UI, responsive navigation, local imports, Telegram browsing/forms.
+- `lib/app.dart`: UI, responsive navigation, channel selection, Library, artwork and Telegram forms.
 - `lib/player.dart`: native audio backend and queue controller.
 - `lib/telegram/td_transport.dart`: native TDLib receiver isolate and correlated requests.
 - `lib/telegram/telegram_service.dart`: authorization, chat updates and music search.
+- `lib/telegram/channel_library.dart`: selected-channel persistence, merged music indexing, pagination, cancellation and partial errors.
 - `lib/telegram/stream_proxy.dart`: authenticated-by-capability loopback byte streaming.
 - `lib/storage.dart`: Windows DPAPI vault and serialized atomic settings writes.
 - `lib/updater.dart` / `lib/update_widgets.dart`: stable GitHub Release checks, checksum-verified downloads, update controls and graceful installer handoff.
@@ -83,9 +101,9 @@ Tests use generated audio and synthetic metadata only. Flutter UI previews are r
 
 ## GitHub Actions
 
-Use this **project directory as the repository root** of [SiamTest/Auralis](https://github.com/SiamTest/Auralis), retaining `.github/workflows/windows.yml`. The workflow targets `windows-2022`, uses pinned action commits and Flutter 3.47.1, runs analysis/tests, builds TDLib from pinned source, builds Flutter Windows x64, runs native smoke tests, and uploads ZIP/installer/source/checksum artifacts. No Telegram secrets are needed. The current GitHub connection has READ permission only; this task inspected the first failed run but has not pushed the shutdown fix or started another run.
+Use this **project directory as the repository root** of [SiamTest/Auralis](https://github.com/SiamTest/Auralis), retaining `.github/workflows/windows.yml`. The workflow targets `windows-2022`, uses pinned action commits and Flutter 3.47.1, runs analysis/tests, builds or restores TDLib, builds Flutter Windows x64, runs native smoke tests, and uploads ZIP/installer/source/checksum artifacts. No Telegram secrets are needed. The current connection has READ permission; this task inspected the successful build but has not pushed the publishing follow-up.
 
-Pushing a matching stable `v*` version tag automatically publishes a GitHub Release after successful checks and server-side digest verification. Ordinary pushes/PRs create artifacts only. The app checks stable releases automatically, downloads after a user click, and requires confirmation to install/restart. Installers remain unsigned. See [UPDATES.md](docs/UPDATES.md) for setup, exact commands, security properties, and test limits. Complete the native corresponding-source/license audit before pushing a public release tag, and verify the first full CI run plus a clean-machine installation before calling it executable-tested.
+Successful `main` builds automatically create the `vMAJOR.MINOR.PATCH` tag at the tested commit and publish a **stable release**, explicitly not a prerelease, after server-side asset digest verification. Matching version-tag builds also publish. Other branches/PRs create artifacts only. Already published versions are immutable: bump `pubspec.yaml` to a new stable version for each later release. The app checks stable releases automatically, downloads after a user click, and requires confirmation to install/restart. Installers remain unsigned. See [UPDATES.md](docs/UPDATES.md) for setup, publishing rules and test limits. The native corresponding-source/license audit and clean-machine installation check remain outstanding; a stable-release flag is not a production-readiness claim.
 
 ## License
 
