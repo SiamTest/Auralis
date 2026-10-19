@@ -29,6 +29,18 @@ SHA256SUMS.txt
 
 GitHub Actions and repository/org policies must permit the publish job's write token. No Telegram credentials or personal access token need to be committed or added to the app. **No complete workflow has passed yet: the first run stopped at native shutdown, before installer packaging. Actual installer compilation/installation remains unverified.** The local machine still lacks Visual Studio C++ Build Tools and Inno Setup.
 
+## TDLib build cache
+
+The workflow restores an exact cache of `native/*.dll`, `native/licenses/` and `native/build-manifest.json`, then skips `tool/build-tdlib.ps1` only when `cache-hit` is `true`. A cache miss runs the same pinned source build. The cache is saved immediately after that build succeeds, before the Flutter build, native smoke test or packaging: a later failure therefore does not discard the expensive TDLib build.
+
+The key includes Windows 2022/x64/Release, GitHub's runner image version, and the hashes of `tool/build-tdlib.ps1` and `.github/workflows/windows.yml`. It changes when pinned TDLib/vcpkg revisions, build options, the workflow or the Windows image change. There are no prefix fallback keys that could restore incompatible binaries. The cache contains build outputs and notices only, with no Telegram account credentials, databases or downloaded music. Native smoke checks still run on cache hits.
+
+The first run with this workflow needs to build and save the cache. Existing runs cannot adopt the change midway through, and old runs did not save a TDLib cache. GitHub controls cache scope, quotas and eviction, so a missing/expired cache causes another full build; no fixed speedup is promised. Ordinary app-source changes can reuse a matching cache. To force a rebuild, delete the matching entry under Actions caches or change the `tdlib-...-v1` key prefix.
+
+This task can supply the edited workflow but cannot push it with the current READ-only GitHub connection. Replace the existing `.github/workflows/windows.yml` and commit it; keep the rest of the project. Actual GitHub cache upload/download and timing still require verification in CI.
+
+Implementation follows the official [restore](https://github.com/actions/cache/blob/0057852bfaa89a56745cba8c7296529d2fc39830/restore/README.md) and [save](https://github.com/actions/cache/blob/0057852bfaa89a56745cba8c7296529d2fc39830/save/README.md) actions, pinned to that commit.
+
 ## Application update flow
 
 - Auralis reads its installed version from Windows package metadata, using `package_info_plus`; it does not assume the source's version is the installed version.
