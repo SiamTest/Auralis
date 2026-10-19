@@ -1,30 +1,30 @@
 # GitHub Releases and application updates
 
-Configured repository: **[SiamTest/Auralis](https://github.com/SiamTest/Auralis)**. [Run 39232305284](https://github.com/SiamTest/Auralis/actions/runs/39232305284) passed the app build, native smoke tests and installer packaging, and saved the TDLib cache. It did not release because the previous workflow published only version tags. This revision adds automatic stable publication from `main`. The current connection has **READ** permission, so this task has not pushed or published the change. Commit this revision to run the updated workflow; rerunning an old commit does not apply it.
+Configured repository: **[SiamTest/Auralis](https://github.com/SiamTest/Auralis)**. [Run 39264104723](https://github.com/SiamTest/Auralis/actions/runs/39264104723) passed the app build, native smoke tests and installer packaging for `v0.1.3`, and reused/saved the TDLib cache without compiling it. Publishing created/uploaded to a draft, then failed with HTTP 404 because its digest check used the published-only by-tag endpoint. This revision adds embedded-cover extraction and saved Library sorting, retains the repair for draft lookup using its numeric release ID and targets `v0.1.5`, preserving the already-created `v0.1.3` tag. The current connection has **READ** permission, so this task has not pushed or published the change. Commit this revision to run the updated workflow; rerunning an old commit does not apply it.
 
 ## Release flow
 
 1. Upload the complete project as the repository root, including `.github`, `pubspec.lock`, tests, native notices and the vendored runtime. A push to `main` runs the Windows build/test/package job and, after success, the stable publisher. A manual run on `main` does the same. Other branches and pull requests produce artifacts only.
 2. Analysis, automated tests, native smoke tests and installer packaging must succeed. The job packages a portable ZIP, per-user Inno Setup installer, application source ZIP from the committed revision, and `SHA256SUMS.txt`.
-3. The publisher reads the stable version from `pubspec.yaml`. For the current `0.1.3+4`, it creates `v0.1.3` at the exact tested commit if that tag is absent. No manual tag is required. An existing tag must already resolve to the tested commit; it is never moved. Explicit stable tag builds remain supported and must match `pubspec.yaml`.
-4. Using the publishing job's `GITHUB_TOKEN` with `contents: write`, it creates an unpublished draft with `--prerelease=false`, uploads all four assets, verifies GitHub's SHA-256 digests, then publishes with `--draft=false --prerelease=false`. The newest stable version is marked Latest; releasing an older version preserves a newer Latest. Build permissions remain read-only, and publishing jobs serialize to avoid concurrent tag/asset updates.
-5. Published versions are immutable. A later push with the same version reports that it is already stable and skips release mutation. For the next app update, bump `pubspec.yaml` to a new stable version, such as `0.1.4+5`, and commit to `main`; it automatically publishes `v0.1.4` after successful checks. A build-number-only change does not create a new stable release. An existing published prerelease is not silently overwritten; use a new stable version.
+3. The publisher reads the stable version from `pubspec.yaml`. For the current `0.1.5+6`, it creates `v0.1.5` at the exact tested commit if that tag is absent. No manual tag is required. An existing tag must already resolve to the tested commit; it is never moved. Explicit stable tag builds remain supported and must match `pubspec.yaml`.
+4. Using the publishing job's `GITHUB_TOKEN` with `contents: write`, it creates an unpublished draft with `--prerelease=false`. It resolves the draft-aware CLI lookup's numeric `databaseId`, checks that the corresponding REST release has the intended tag and remains a non-prerelease draft, then uploads all four assets. It refreshes metadata by numeric ID, verifies GitHub's SHA-256 asset digests, then publishes with `--draft=false --prerelease=false`. It never uses the published-only by-tag REST route to verify a draft. The newest stable version is marked Latest; releasing an older version preserves a newer Latest. Build permissions remain read-only, and publishing jobs serialize to avoid concurrent tag/asset updates.
+5. Published versions are immutable. A later push with the same version reports that it is already stable and skips release mutation. For the next app update, bump `pubspec.yaml` to a new stable version, such as `0.1.6+7`, and commit to `main`; it automatically publishes `v0.1.6` after successful checks. A build-number-only change does not create a new stable release. An existing published prerelease is not silently overwritten; use a new stable version.
 
 Optional tag-based release after completing the native distribution audit:
 
 ```powershell
-git tag v0.1.3
-git push origin v0.1.3
+git tag v0.1.5
+git push origin v0.1.5
 ```
 
-Tags such as `v0.1.3-beta`, mismatched versions, pull requests, other branches and mismatched checkout commits cannot publish. Existing drafts may resume only at their original tested tag/commit; a failed digest check leaves the draft unpublished. GitHub API permission/network errors fail explicitly instead of being treated as a missing release.
+Tags such as `v0.1.3-beta`, mismatched versions, pull requests, other branches and mismatched checkout commits cannot publish. Existing drafts may resume only at their original tested tag/commit; a failed digest check leaves the draft unpublished. GitHub API permission/network errors fail explicitly instead of being treated as a missing release. An `untagged-…` URL is normal for an unpublished draft; it is not a reason to delete or move the version tag. The failed `v0.1.3` draft may remain; the new source uses `v0.1.5` because the existing version tag points to the previous tested commit.
 
-Expected assets for `v0.1.3`:
+Expected assets for `v0.1.5`:
 
 ```text
-auralis-0.1.3-windows-x64.zip
-auralis-0.1.3-windows-x64-setup.exe
-auralis-0.1.3-source.zip
+auralis-0.1.5-windows-x64.zip
+auralis-0.1.5-windows-x64-setup.exe
+auralis-0.1.5-source.zip
 SHA256SUMS.txt
 ```
 
