@@ -5,6 +5,7 @@
 /// Use of this source code is governed by MIT license that can be found in the LICENSE file.
 import 'dart:collection';
 import 'dart:ffi';
+import 'dart:io';
 
 import 'package:media_kit/ffi/ffi.dart';
 import 'package:media_kit/generated/libmpv/bindings.dart' as generated;
@@ -40,7 +41,12 @@ class InitializerNativeCallable {
     Future<void> Function(Pointer<generated.mpv_event>) callback, {
     Map<String, String> options = const {},
   }) async {
+    final mtaCookie = Platform.isWindows ? _retainWindowsMta() : nullptr;
     final ctx = mpv.mpv_create();
+    if (ctx == nullptr) {
+      _releaseWindowsMta(mtaCookie);
+      throw StateError('libmpv could not create a player');
+    }
     for (final entry in options.entries) {
       final name = entry.key.toNativeUtf8();
       final value = entry.value.toNativeUtf8();
@@ -48,12 +54,18 @@ class InitializerNativeCallable {
       calloc.free(name);
       calloc.free(value);
     }
-    mpv.mpv_initialize(ctx);
+    final status = mpv.mpv_initialize(ctx);
+    if (status < 0) {
+      mpv.mpv_destroy(ctx);
+      _releaseWindowsMta(mtaCookie);
+      throw StateError('libmpv initialization failed: $status');
+    }
     final nativeCallable = WakeUpNativeCallable.listener(_callback);
     final nativeFunction = nativeCallable.nativeFunction;
     _locks[ctx.address] = Lock();
     _eventCallbacks[ctx.address] = callback;
     _wakeUpNativeCallables[ctx.address] = nativeCallable;
+    if (mtaCookie != nullptr) _windowsMtaCookies[ctx.address] = mtaCookie;
     mpv.mpv_set_wakeup_callback(ctx, nativeFunction.cast(), ctx.cast());
     return ctx;
   }
@@ -78,6 +90,7 @@ class InitializerNativeCallable {
     if (lock != null) await lock.synchronized(() {});
     await compute(_terminateDestroy, (NativeLibrary.path, ctx.address));
     _wakeUpNativeCallables.remove(ctx.address)?.close();
+    _releaseWindowsMta(_windowsMtaCookies.remove(ctx.address) ?? nullptr);
   }
 
   void _callback(Pointer<generated.mpv_handle> ctx) {
@@ -95,6 +108,7 @@ class InitializerNativeCallable {
   final _locks = HashMap<int, Lock>();
   final _eventCallbacks = EventCallbackMap();
   final _wakeUpNativeCallables = WakeUpNativeCallableMap();
+  final _windowsMtaCookies = HashMap<int, Pointer<Void>>();
 }
 
 typedef WakeUpCallback = Void Function(Pointer<generated.mpv_handle>);
@@ -107,4 +121,34 @@ typedef EventCallbackMap = HashMap<int, EventCallback>;
 void _terminateDestroy((String, int) handle) {
   final mpv = generated.MPV(DynamicLibrary.open(handle.$1));
   mpv.mpv_terminate_destroy(Pointer.fromAddress(handle.$2));
+}
+
+Pointer<Void> _retainWindowsMta() {
+  // Keep WASAPI COM objects alive across Dart/core thread exits until teardown.
+  final ole32 = DynamicLibrary.open('ole32.dll');
+  final increment = ole32.lookupFunction<Int32 Function(Pointer<Pointer<Void>>),
+      int Function(Pointer<Pointer<Void>>)>('CoIncrementMTAUsage');
+  final slot = calloc<Pointer<Void>>();
+  try {
+    final result = increment(slot);
+    if (result < 0 || slot.value == nullptr) {
+      throw StateError('Cannot retain Windows COM during libmpv shutdown: '
+          '0x${result.toUnsigned(32).toRadixString(16)}');
+    }
+    return slot.value;
+  } finally {
+    calloc.free(slot);
+  }
+}
+
+void _releaseWindowsMta(Pointer<Void> cookie) {
+  if (cookie == nullptr) return;
+  final decrement = DynamicLibrary.open('ole32.dll').lookupFunction<
+      Int32 Function(Pointer<Void>),
+      int Function(Pointer<Void>)>('CoDecrementMTAUsage');
+  final result = decrement(cookie);
+  if (result < 0) {
+    throw StateError('Cannot release Windows COM after libmpv shutdown: '
+        '0x${result.toUnsigned(32).toRadixString(16)}');
+  }
 }
