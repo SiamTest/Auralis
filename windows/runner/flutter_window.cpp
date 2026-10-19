@@ -64,8 +64,13 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   switch (message) {
     case WM_GETMINMAXINFO: {
       auto* limits = reinterpret_cast<MINMAXINFO*>(lparam);
-      limits->ptMinTrackSize.x = 520;
-      limits->ptMinTrackSize.y = 560;
+      const int dpi = static_cast<int>(GetDpiForWindow(hwnd));
+      RECT minimum = {0, 0, MulDiv(360, dpi, 96), MulDiv(480, dpi, 96)};
+      AdjustWindowRectExForDpi(
+          &minimum, static_cast<DWORD>(GetWindowLongPtr(hwnd, GWL_STYLE)), FALSE,
+          static_cast<DWORD>(GetWindowLongPtr(hwnd, GWL_EXSTYLE)), dpi);
+      limits->ptMinTrackSize.x = minimum.right - minimum.left;
+      limits->ptMinTrackSize.y = minimum.bottom - minimum.top;
       return 0;
     }
     case WM_FONTCHANGE:
