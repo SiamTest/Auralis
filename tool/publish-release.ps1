@@ -43,9 +43,15 @@ if ($TagRef) {
 if (-not $Existing) {
     gh release create $Tag --repo $Repository --verify-tag --draft --prerelease=false --title "Auralis $Version" --generate-notes
 }
+$ReleaseId = gh release view $Tag --repo $Repository --json databaseId --jq '.databaseId'
+if ($ReleaseId -notmatch '^[1-9]\d*$') { throw 'GitHub returned an invalid draft release ID.' }
+$Draft = gh api "repos/$Repository/releases/$ReleaseId" | ConvertFrom-Json
+if ($Draft.tag_name -ne $Tag -or -not $Draft.draft -or $Draft.prerelease) {
+    throw 'Expected an unpublished stable draft for this version; no assets were changed.'
+}
 gh release upload $Tag @Files --repo $Repository --clobber
 # Keep the release unpublished until every server-side digest matches its file.
-$Release = gh api "repos/$Repository/releases/tags/$Tag" | ConvertFrom-Json
+$Release = gh api "repos/$Repository/releases/$ReleaseId" | ConvertFrom-Json
 foreach ($Path in $Files) {
     $Name = [System.IO.Path]::GetFileName($Path)
     $Asset = @($Release.assets | Where-Object name -eq $Name)
