@@ -14,24 +14,14 @@ jobs:
   build:
     runs-on: windows-2022
     timeout-minutes: 120
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.ci-cache/vcpkg-binaries
+      VCPKG_DOWNLOADS: ${{ github.workspace }}/.ci-cache/vcpkg-downloads
     defaults:
       run:
         shell: pwsh
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
-        with:
-          flutter-version: '3.47.1'
-          channel: stable
-          cache: true
-      - name: Resolve locked dependencies
-        run: flutter pub get --enforce-lockfile
-      - name: Validate stable version and tag
-        run: ./tool/package.ps1 -ValidateOnly
-      - name: Static analysis
-        run: flutter analyze --no-pub --fatal-infos
-      - name: Automated tests
-        run: flutter test --no-pub --reporter expanded
       - name: Identify Windows build image
         id: tdlib-image
         run: |
@@ -39,6 +29,35 @@ jobs:
             throw 'The Windows runner image version is required for the TDLib cache key.'
           }
           "version=$env:ImageVersion" >> $env:GITHUB_OUTPUT
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        id: flutter
+        with:
+          flutter-version: '3.47.1'
+          channel: stable
+          cache: true
+          pub-cache: true
+      - name: Resolve locked dependencies
+        run: flutter pub get --enforce-lockfile
+      - name: Validate stable version and tag
+        run: ./tool/package.ps1 -ValidateOnly
+      - name: Restore Windows and Dart build intermediates
+        id: windows-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          key: windows-build-v1-${{ steps.tdlib-image.outputs.version }}-${{ steps.flutter.outputs.CACHE-KEY }}-${{ hashFiles('pubspec.lock', 'windows/CMakeLists.txt', 'windows/runner/**', 'windows/flutter/CMakeLists.txt', 'third_party/**') }}-${{ hashFiles('lib/**', 'assets/**', 'pubspec.yaml') }}
+          restore-keys: windows-build-v1-${{ steps.tdlib-image.outputs.version }}-${{ steps.flutter.outputs.CACHE-KEY }}-${{ hashFiles('pubspec.lock', 'windows/CMakeLists.txt', 'windows/runner/**', 'windows/flutter/CMakeLists.txt', 'third_party/**') }}-
+          # Rebuild the final bundle; reuse only compatible intermediate output.
+          path: |
+            .dart_tool/flutter_build/
+            .dart_tool/hooks_runner/
+            .dart_tool/native_assets/
+            build/native_assets/windows/
+            build/windows/
+            !build/windows/x64/runner/Release/
+      - name: Static analysis
+        run: flutter analyze --no-pub --fatal-infos
+      - name: Automated tests
+        run: flutter test --no-pub --reporter expanded
       - name: Restore compiled TDLib
         id: tdlib-cache
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -60,9 +79,30 @@ jobs:
             native/*.dll
             native/licenses/
             native/build-manifest.json
+      - name: Restore vcpkg downloads and compiled dependencies
+        id: vcpkg-cache
+        if: steps.tdlib-cache.outputs.cache-hit != 'true' && steps.tdlib-previous-cache.outputs.cache-hit != 'true' && steps.tdlib-previous-cache.outputs.cache-matched-key != format('tdlib-windows-2022-x64-release-v1-{0}-dd3ad69f2b8c1b8b18a240341b323fc8f51a81540224546fa0fa684874f27af8', steps.tdlib-image.outputs.version)
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          key: vcpkg-windows-2022-x64-v1-${{ steps.tdlib-image.outputs.version }}-${{ hashFiles('tool/build-tdlib.ps1') }}
+          restore-keys: vcpkg-windows-2022-x64-v1-${{ steps.tdlib-image.outputs.version }}-
+          path: |
+            .ci-cache/vcpkg-binaries/
+            .ci-cache/vcpkg-downloads/
+      - name: Prepare vcpkg cache directories
+        if: steps.vcpkg-cache.outputs.cache-primary-key != ''
+        run: New-Item -ItemType Directory -Force $env:VCPKG_DEFAULT_BINARY_CACHE, $env:VCPKG_DOWNLOADS | Out-Null
       - name: Build TDLib from pinned source
         if: steps.tdlib-cache.outputs.cache-hit != 'true' && steps.tdlib-previous-cache.outputs.cache-hit != 'true' && steps.tdlib-previous-cache.outputs.cache-matched-key != format('tdlib-windows-2022-x64-release-v1-{0}-dd3ad69f2b8c1b8b18a240341b323fc8f51a81540224546fa0fa684874f27af8', steps.tdlib-image.outputs.version)
         run: ./tool/build-tdlib.ps1 -Jobs 2
+      - name: Save vcpkg downloads and compiled dependencies
+        if: ${{ !cancelled() && steps.vcpkg-cache.outputs.cache-primary-key != '' && steps.vcpkg-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
+          path: |
+            .ci-cache/vcpkg-binaries/
+            .ci-cache/vcpkg-downloads/
       - name: Save compiled TDLib
         if: steps.tdlib-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -74,6 +114,18 @@ jobs:
             native/build-manifest.json
       - name: Windows release build
         run: flutter build windows --release --no-pub --dart-define=AURALIS_RELEASE_REPOSITORY=$env:GITHUB_REPOSITORY
+      - name: Save Windows and Dart build intermediates
+        if: steps.windows-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          key: ${{ steps.windows-cache.outputs.cache-primary-key }}
+          path: |
+            .dart_tool/flutter_build/
+            .dart_tool/hooks_runner/
+            .dart_tool/native_assets/
+            build/native_assets/windows/
+            build/windows/
+            !build/windows/x64/runner/Release/
       - name: Native encryption, TDLib, playback, proxy and seek smoke test
         run: |
           dart run tool/native_smoke_repeat.dart `
