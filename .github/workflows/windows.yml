@@ -32,8 +32,34 @@ jobs:
         run: flutter analyze --no-pub --fatal-infos
       - name: Automated tests
         run: flutter test --no-pub --reporter expanded
+      - name: Identify Windows build image
+        id: tdlib-image
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:ImageVersion)) {
+            throw 'The Windows runner image version is required for the TDLib cache key.'
+          }
+          "version=$env:ImageVersion" >> $env:GITHUB_OUTPUT
+      - name: Restore compiled TDLib
+        id: tdlib-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          key: tdlib-windows-2022-x64-release-v1-${{ steps.tdlib-image.outputs.version }}-${{ hashFiles('tool/build-tdlib.ps1', '.github/workflows/windows.yml') }}
+          path: |
+            native/*.dll
+            native/licenses/
+            native/build-manifest.json
       - name: Build TDLib from pinned source
+        if: steps.tdlib-cache.outputs.cache-hit != 'true'
         run: ./tool/build-tdlib.ps1 -Jobs 2
+      - name: Save compiled TDLib
+        if: steps.tdlib-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          key: ${{ steps.tdlib-cache.outputs.cache-primary-key }}
+          path: |
+            native/*.dll
+            native/licenses/
+            native/build-manifest.json
       - name: Windows release build
         run: flutter build windows --release --no-pub --dart-define=AURALIS_RELEASE_REPOSITORY=$env:GITHUB_REPOSITORY
       - name: Native encryption, TDLib, playback, proxy and seek smoke test
