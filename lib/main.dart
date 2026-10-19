@@ -32,7 +32,7 @@ Future<void> main() async {
     try {
       await settings.load();
     } catch (_) {
-      warning = 'Settings could not be read. Defaults are active; your audio files are unchanged.';
+      warning = 'Settings could not be read. Defaults are active; select your Telegram channels again.';
     }
     final vault = SecretVault(File(p.join(root.path, 'credentials.dpapi')));
     final telegram = TelegramService(
