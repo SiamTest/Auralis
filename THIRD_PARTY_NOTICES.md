@@ -33,3 +33,7 @@ The plugin's older native build is retained only for this development milestone 
 Local native smoke tests used the `tdjson` 1.8.68 CPython 3.12 Windows x64 wheel from PyPI, checksum-verified as SHA-256 `0ce9a92d2ceaa2020eaf83af4310b411b015a340b26b35931aa873d690afd8bd`. Its DLLs remain outside this source deliverable in the task scratch folder; the Python binding is not a dependency of Auralis. The tested native library reported version 1.8.68. This does not verify the separate MSVC source-build script or its dependency versions.
 
 CI builds TDLib from its pinned public source instead. Preserve its generated `native/build-manifest.json` and `native/licenses/` alongside any bundle. Flutter package notices are in the generated application `NOTICES` asset and accessible through Settings → Licenses; native notices are also supplied as files by the packaging script.
+
+## Optional lyrics service
+
+[LRCLIB](https://lrclib.net/docs) is an optional HTTPS service, not bundled app code or a runtime package dependency. Auralis independently implements its API client and line-timed LRC parser. Online lookup is explicitly requested in the lyrics view and sends song title/artist/duration only. Retrieved or pasted song lyrics retain their respective owners' rights; the Auralis source license does not relicense that content. Only original synthetic lyric text is included in tests/screenshots. No PixelPlayer code or assets are reused.
