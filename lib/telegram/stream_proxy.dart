@@ -35,6 +35,7 @@ class ByteRange {
 }
 
 /// A capability URL on IPv4 loopback. No account data or remote file IDs are public.
+/// Relays original file bytes without transcoding or adaptive bitrate reduction.
 class TelegramStreamProxy {
   TelegramStreamProxy(
     this.request, {
@@ -58,7 +59,9 @@ class TelegramStreamProxy {
 
   Future<Uri> uri(Track track) async {
     if (track.fileId == null || track.size <= 0) {
-      throw StateError('Telegram file size is unavailable. Refresh the chat.');
+      throw StateError(
+        'Telegram file size is unavailable. Refresh the Library.',
+      );
     }
     final generation = ++_sourceGeneration;
     await (_starting ??= _start());
