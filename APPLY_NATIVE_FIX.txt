@@ -1,8 +1,10 @@
-Restore the complete Auralis project
+Complete Auralis project: Windows COM shutdown follow-up
 
-The inspected main branch contained only the shutdown patch (63 files). It was missing 49 original project files, including lib/main.dart, the Windows runner, tests, LICENSE, and tool/package.ps1. This is why ./tool/package.ps1 -ValidateOnly could not start. Changing the command or bypassing validation would leave the rest of the app missing.
+This full archive includes the app, Windows runner/header fix, all build/packaging scripts and tests, TDLib build caching, and media_kit 1.2.6+auralis.2 with the Windows COM lifetime follow-up. It is an entire project, not just changed files.
 
-Use auralis-complete-project.zip for this recovery. It contains the complete source, the native shutdown fix, and the earlier Windows header fix. The project files are at the ZIP root; there is no extra auralis/ parent folder. This replaces the old patch-only upload instructions.
+The earlier callback-ordering patch did not resolve CI: the next trace still crashed at libmpv-2.dll+0x13fa81. Inspection maps that address to Windows WASAPI device-monitor teardown. The new revision retains Windows COM's MTA from player creation until native destruction and callback closure. It does not ignore crashes, force process exit, or disable device enumeration. See docs/NATIVE_SHUTDOWN_FIX.md.
+
+The project files are at the ZIP root; there is no extra auralis/ parent folder. This replaces older patch-only upload instructions.
 
 1. Extract the ZIP on your computer.
 2. In SiamTest/Auralis, upload ALL extracted files and folders into the repository root, including .github, lib, windows, test, tool, third_party, native, docs, LICENSE, pubspec.yaml and pubspec.lock. Do not upload only the ZIP itself or put these files inside another project folder.
@@ -13,8 +15,8 @@ https://github.com/SiamTest/Auralis/blob/main/tool/package.ps1
 https://github.com/SiamTest/Auralis/blob/main/lib/main.dart
 https://github.com/SiamTest/Auralis/blob/main/windows/CMakeLists.txt
 
-All files shared between the inspected patch-only repository and the local project matched (allowing Windows/Unix line endings). The earlier win32_window.h fix also matched. No user code changes were discarded while preparing the complete archive.
+The earlier win32_window.h fix is preserved. Commit pubspec.lock and the entire third_party/media_kit directory, including its MIT LICENSE. The new lockfile must resolve media_kit to 1.2.6+auralis.2.
 
-Checks: source archive integrity and completeness; package.ps1 -ValidateOnly printed 0.1.0 successfully; the existing packaging/version/tag test passed. The previous native fix passed 22 app tests and 12 native shutdown checks locally.
+Checks: source archive integrity/completeness and extracted package version validation. The app suite passed 22 tests, and the final native repeat test passed three processes with four shutdowns each (12 total), including an explicit audio-device-list query and real Windows COM usage-cookie calls.
 
-No executable or installer is included. The complete GitHub build still needs to pass after restoring the files. This task has READ-only GitHub access and has not uploaded or committed the recovery.
+The CI crash has not reproduced locally, including before this follow-up, so local passes do not establish that the CI failure is fixed. The updated full GitHub build still needs verification. No executable/installer is included; live Telegram login, audible output and installer/update execution remain unverified. This task has READ-only GitHub access and has not pushed a commit.
