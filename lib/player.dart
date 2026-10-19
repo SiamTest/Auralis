@@ -205,13 +205,15 @@ class PlayerController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> setVolume(double value) async {
-    settings.volume = value;
+  Future<void> setVolume(double value, {bool persist = true}) async {
+    final volume = value.clamp(0.0, 100.0);
+    settings.volume = volume;
+    notifyListeners();
     try {
-      await audio.volume(value);
-      await settings.save();
+      await audio.volume(volume);
+      if (persist) await settings.save();
     } catch (_) {
-      error = 'Could not save the volume setting.';
+      error = 'Could not apply or save the volume setting.';
       notifyListeners();
     }
   }
