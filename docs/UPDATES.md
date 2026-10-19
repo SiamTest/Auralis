@@ -1,6 +1,6 @@
 # GitHub Releases and application updates
 
-Configured repository: **[SiamTest/Auralis](https://github.com/SiamTest/Auralis)**. The repository existed and was empty when inspected. The current GitHub CLI connection reported **READ** permission, so this task cannot upload files, trigger a workflow there, or publish a release. The implementation is in this source tree/ZIP; it is not live on GitHub yet.
+Configured repository: **[SiamTest/Auralis](https://github.com/SiamTest/Auralis)**. The user uploaded the source and the first workflow built TDLib and Flutter successfully, then failed during native smoke-test shutdown. The current GitHub CLI connection reports **READ** permission, so this task cannot upload the fix, trigger a workflow there, or publish a release. Commit the included [shutdown fix](NATIVE_SHUTDOWN_FIX.md) before starting another build; rerunning the old commit does not apply it.
 
 ## Release flow
 
@@ -27,7 +27,7 @@ auralis-0.1.1-source.zip
 SHA256SUMS.txt
 ```
 
-GitHub Actions and repository/org policies must permit the publish job's write token. No Telegram credentials or personal access token need to be committed or added to the app. A fresh repository may require enabling Actions. **The complete workflow has not yet run, and actual Windows installer compilation/installation remains unverified locally.** The local machine still lacks Visual Studio C++ Build Tools and Inno Setup.
+GitHub Actions and repository/org policies must permit the publish job's write token. No Telegram credentials or personal access token need to be committed or added to the app. **No complete workflow has passed yet: the first run stopped at native shutdown, before installer packaging. Actual installer compilation/installation remains unverified.** The local machine still lacks Visual Studio C++ Build Tools and Inno Setup.
 
 ## Application update flow
 
