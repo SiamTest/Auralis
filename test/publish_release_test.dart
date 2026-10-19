@@ -121,10 +121,71 @@ void main() {
         containsAll(['--draft=false', '--prerelease=false', '--latest=true']),
       );
       final digest = calls.indexWhere(
-        (args) => args.any((arg) => '$arg'.endsWith('/releases/tags/v0.9.0')),
+        (args) => args.any((arg) => '$arg'.endsWith('/releases/101')),
       );
       expect(calls.indexOf(edit), greaterThan(digest));
     });
+
+    test(
+      'a draft whose by-tag API returns 404 is verified by ID after upload',
+      () async {
+        final (result, calls) = await run('draft');
+        expect(result.exitCode, 0, reason: '${result.stderr}');
+        expect(
+          calls.any(
+            (args) => args.any((arg) => '$arg'.contains('/releases/tags/')),
+          ),
+          isFalse,
+        );
+        final lookup = calls.singleWhere(
+          (args) => args.take(2).join(' ') == 'release view',
+        );
+        expect(
+          lookup,
+          containsAll([
+            'v0.9.0',
+            '--json',
+            'databaseId',
+            '--jq',
+            '.databaseId',
+          ]),
+        );
+        final upload = calls.indexWhere(
+          (args) => args.take(2).join(' ') == 'release upload',
+        );
+        final metadata = [
+          for (var i = 0; i < calls.length; i++)
+            if (calls[i].contains('repos/fixture/auralis/releases/101')) i,
+        ];
+        expect(metadata, hasLength(2));
+        expect(metadata.first, lessThan(upload));
+        expect(metadata.last, greaterThan(upload));
+        expect(
+          calls.last,
+          containsAll(['--draft=false', '--prerelease=false']),
+        );
+      },
+    );
+
+    for (final scenario in [
+      'invalid-release-id',
+      'draft-became-published',
+      'lookup-failure',
+      'wrong-draft-tag',
+    ]) {
+      test('$scenario cannot upload or publish assets', () async {
+        final (result, calls) = await run(scenario);
+        expect(result.exitCode, isNot(0));
+        expect(
+          calls.any((args) => args.take(2).join(' ') == 'release upload'),
+          isFalse,
+        );
+        expect(
+          calls.any((args) => args.take(2).join(' ') == 'release edit'),
+          isFalse,
+        );
+      });
+    }
 
     test(
       'matching version tag publishes without creating or moving its tag',
