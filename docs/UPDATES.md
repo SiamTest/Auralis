@@ -1,33 +1,34 @@
 # GitHub Releases and application updates
 
-Configured repository: **[SiamTest/Auralis](https://github.com/SiamTest/Auralis)**. The user uploaded the source and the first workflow built TDLib and Flutter successfully, then failed during native smoke-test shutdown. The current GitHub CLI connection reports **READ** permission, so this task cannot upload the fix, trigger a workflow there, or publish a release. Commit the included [shutdown fix](NATIVE_SHUTDOWN_FIX.md) before starting another build; rerunning the old commit does not apply it.
+Configured repository: **[SiamTest/Auralis](https://github.com/SiamTest/Auralis)**. [Run 39232305284](https://github.com/SiamTest/Auralis/actions/runs/39232305284) passed the app build, native smoke tests and installer packaging, and saved the TDLib cache. It did not release because the previous workflow published only version tags. This revision adds automatic stable publication from `main`. The current connection has **READ** permission, so this task has not pushed or published the change. Commit this revision to run the updated workflow; rerunning an old commit does not apply it.
 
 ## Release flow
 
-1. Upload this project's contents as the repository root, including the hidden `.github` directory, `pubspec.lock`, and the license files. The main-branch push runs the Windows build/test/package job.
-2. The job runs analysis and all tests, builds TDLib and the Flutter Windows app, and runs the native smoke test. It packages a portable ZIP, a per-user Inno Setup installer, an application source ZIP from the committed revision, and `SHA256SUMS.txt`. These are downloadable Actions artifacts for ordinary pushes/PRs/manual runs.
-3. Push a stable tag that **matches `pubspec.yaml`**. Initial version: `v0.1.0` for `0.1.0+1`. A later release should first change the version to, for example, `0.1.1+2`, then tag the committed change `v0.1.1`.
-4. Only tag builds enter the publishing job. It uses the workflow's `GITHUB_TOKEN` with `contents: write`; the build job keeps read-only permissions. The publisher creates a draft, uploads the assets, checks GitHub's SHA-256 asset digests against the local files, then publishes it as the latest stable release. A failed asset check leaves the draft unpublished. Already published tag assets are not replaced on a rerun.
+1. Upload the complete project as the repository root, including `.github`, `pubspec.lock`, tests, native notices and the vendored runtime. A push to `main` runs the Windows build/test/package job and, after success, the stable publisher. A manual run on `main` does the same. Other branches and pull requests produce artifacts only.
+2. Analysis, automated tests, native smoke tests and installer packaging must succeed. The job packages a portable ZIP, per-user Inno Setup installer, application source ZIP from the committed revision, and `SHA256SUMS.txt`.
+3. The publisher reads the stable version from `pubspec.yaml`. For the current `0.1.3+4`, it creates `v0.1.3` at the exact tested commit if that tag is absent. No manual tag is required. An existing tag must already resolve to the tested commit; it is never moved. Explicit stable tag builds remain supported and must match `pubspec.yaml`.
+4. Using the publishing job's `GITHUB_TOKEN` with `contents: write`, it creates an unpublished draft with `--prerelease=false`, uploads all four assets, verifies GitHub's SHA-256 digests, then publishes with `--draft=false --prerelease=false`. The newest stable version is marked Latest; releasing an older version preserves a newer Latest. Build permissions remain read-only, and publishing jobs serialize to avoid concurrent tag/asset updates.
+5. Published versions are immutable. A later push with the same version reports that it is already stable and skips release mutation. For the next app update, bump `pubspec.yaml` to a new stable version, such as `0.1.4+5`, and commit to `main`; it automatically publishes `v0.1.4` after successful checks. A build-number-only change does not create a new stable release. An existing published prerelease is not silently overwritten; use a new stable version.
 
-Example after committing the complete initial source to `main` and completing the native distribution audit:
+Optional tag-based release after completing the native distribution audit:
 
 ```powershell
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.3
+git push origin v0.1.3
 ```
 
-Subsequent releases use the bumped matching version/tag. Branch names or tags such as `v0.1.1-beta` do not publish a stable release; mismatched or non-stable tags fail validation. The publisher validates the exact tag again before making any release changes.
+Tags such as `v0.1.3-beta`, mismatched versions, pull requests, other branches and mismatched checkout commits cannot publish. Existing drafts may resume only at their original tested tag/commit; a failed digest check leaves the draft unpublished. GitHub API permission/network errors fail explicitly instead of being treated as a missing release.
 
-Expected assets for `v0.1.1`:
+Expected assets for `v0.1.3`:
 
 ```text
-auralis-0.1.1-windows-x64.zip
-auralis-0.1.1-windows-x64-setup.exe
-auralis-0.1.1-source.zip
+auralis-0.1.3-windows-x64.zip
+auralis-0.1.3-windows-x64-setup.exe
+auralis-0.1.3-source.zip
 SHA256SUMS.txt
 ```
 
-GitHub Actions and repository/org policies must permit the publish job's write token. No Telegram credentials or personal access token need to be committed or added to the app. **No complete workflow has passed yet: the first run stopped at native shutdown, before installer packaging. Actual installer compilation/installation remains unverified.** The local machine still lacks Visual Studio C++ Build Tools and Inno Setup.
+GitHub Actions and repository/org policies must permit the publish job's write token. No Telegram credentials or personal access token need to be committed or added to the app. **Windows compilation, native smoke tests and installer compilation passed in run 39232305284. Actual stable publication, installation and in-app update execution remain unverified.** The local machine still lacks Visual Studio C++ Build Tools and Inno Setup. Publisher behavior is tested with a process-local fake GitHub CLI; it makes no external mutations during tests.
 
 ## TDLib build cache
 
@@ -36,6 +37,8 @@ The workflow restores an exact cache of `native/*.dll`, `native/licenses/` and `
 The key includes Windows 2022/x64/Release, GitHub's runner image version, and the hashes of `tool/build-tdlib.ps1` and `.github/workflows/windows.yml`. It changes when pinned TDLib/vcpkg revisions, build options, the workflow or the Windows image change. There are no prefix fallback keys that could restore incompatible binaries. The cache contains build outputs and notices only, with no Telegram account credentials, databases or downloaded music. Native smoke checks still run on cache hits.
 
 The first run with this workflow needs to build and save the cache. Existing runs cannot adopt the change midway through, and old runs did not save a TDLib cache. GitHub controls cache scope, quotas and eviction, so a missing/expired cache causes another full build; no fixed speedup is promised. Ordinary app-source changes can reuse a matching cache. To force a rebuild, delete the matching entry under Actions caches or change the `tdlib-...-v1` key prefix.
+
+The cache was successfully saved by run 39232305284. This stable-publishing workflow edit changes the hashed workflow input, so its first run requires another native build; later identical keys can reuse that cache.
 
 This task can supply the edited workflow but cannot push it with the current READ-only GitHub connection. Replace the existing `.github/workflows/windows.yml` and commit it; keep the rest of the project. Actual GitHub cache upload/download and timing still require verification in CI.
 
@@ -60,6 +63,6 @@ GitHub's digest detects corrupted/mismatched downloads; it is **not** an indepen
 
 The default update source is `SiamTest/Auralis`. CI explicitly builds with `--dart-define=AURALIS_RELEASE_REPOSITORY=$env:GITHUB_REPOSITORY`, so an intentional fork uses its own repository; local builds default to SiamTest/Auralis. Changing the source requires rebuilding the app. Users cannot enter arbitrary executable URLs in Settings.
 
-The original native playback corresponding-source/security audit remains outstanding. **Resolve the native source/licenses and codec updates before pushing a public release tag**: the tag workflow is configured to publish automatically after technical checks, and those checks are not a substitute for that audit. The application source ZIP contains this project, not complete corresponding source for every prebuilt native playback dependency. See `THIRD_PARTY_NOTICES.md`.
+The original native playback corresponding-source/security audit remains outstanding. **Resolve native source/licenses and codec updates before public binary distribution.** This revision publishes automatically from successful `main` builds as requested; technical checks and a stable-release flag do not substitute for that audit. The application source ZIP contains this project, not complete corresponding source for every prebuilt native playback dependency. See `THIRD_PARTY_NOTICES.md`.
 
 Primary documentation: [GitHub release API](https://docs.github.com/en/rest/releases/releases), [GitHub CLI release creation](https://cli.github.com/manual/gh_release_create), [Inno Setup command-line parameters](https://jrsoftware.org/ishelp/topic_setupcmdline.htm).
