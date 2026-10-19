@@ -38,7 +38,7 @@ jobs:
         run: flutter build windows --release --no-pub --dart-define=AURALIS_RELEASE_REPOSITORY=$env:GITHUB_REPOSITORY
       - name: Native encryption, TDLib, playback, proxy and seek smoke test
         run: |
-          dart run tool/native_smoke.dart `
+          dart run tool/native_smoke_repeat.dart `
             "$PWD/build/windows/x64/runner/Release/libmpv-2.dll" `
             "$PWD/native/tdjson.dll"
       - name: Locate Inno Setup
