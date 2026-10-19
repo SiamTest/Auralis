@@ -13,11 +13,21 @@ import 'td_transport.dart';
 import 'embedded_cover.dart';
 
 class TelegramService extends ChangeNotifier {
-  TelegramService(this.directory, this.vault, {TdTransport? transport})
-    : transport = transport ?? TdTransport();
+  TelegramService(
+    this.directory,
+    this.vault, {
+    TdTransport? transport,
+    TdTransport Function()? createTransport,
+  }) : _createTransport = createTransport ?? TdTransport.new,
+       _transport = transport ?? (createTransport ?? TdTransport.new)();
   final Directory directory;
   final SecretVault vault;
-  final TdTransport transport;
+  TdTransport _transport;
+  final TdTransport Function() _createTransport;
+  bool _clientClosed = false;
+  TdTransport get transport => _transport;
+  // Resolve the current client even when the playback proxy keeps this tear-off.
+  Future<Json> request(Json json) => _transport.request(json);
   StreamSubscription<Json>? _subscription;
   Json _secrets = {};
   String state = 'disconnected';
@@ -194,7 +204,17 @@ class TelegramService extends ChangeNotifier {
 
   Future<void> start({int? apiId, String? apiHash}) async {
     await action(() async {
+      if (state != 'disconnected') {
+        throw StateError('Finish signing out before entering new API details.');
+      }
       _secrets = await vault.read();
+      if (apiId == null &&
+          apiHash == null &&
+          !_secrets.containsKey('apiId') &&
+          !_secrets.containsKey('apiHash')) {
+        state = 'disconnected';
+        return;
+      }
       if (apiId != null) _secrets['apiId'] = apiId;
       if (apiHash != null) _secrets['apiHash'] = apiHash;
       if ((_secrets['apiId'] as int? ?? 0) <= 0 ||
@@ -208,6 +228,12 @@ class TelegramService extends ChangeNotifier {
       await vault.write(_secrets);
       await directory.create(recursive: true);
       await _subscription?.cancel();
+      if (_clientClosed) {
+        await _transport.close();
+        _transport = _createTransport();
+        _clientClosed = false;
+        _parametersSent = false;
+      }
       _subscription = transport.updates.listen(_onUpdate);
       final native = p.join(
         p.dirname(Platform.resolvedExecutable),
@@ -289,6 +315,13 @@ class TelegramService extends ChangeNotifier {
   bool _parametersSent = false;
   Future<void> _onAuthorization(Json auth) async {
     state = auth['@type'] as String;
+    if (state == 'authorizationStateClosed') {
+      _clientClosed = true;
+      _parametersSent = false;
+      connection = 'Offline';
+      _channels.clear();
+      state = 'disconnected';
+    }
     if (!ready) {
       clearImageCache();
       if (state == 'authorizationStateLoggingOut' ||
@@ -316,7 +349,7 @@ class TelegramService extends ChangeNotifier {
           'system_language_code': 'en',
           'device_model': 'Auralis Windows x64',
           'system_version': 'Windows',
-          'application_version': '0.1.12',
+          'application_version': '0.1.13',
         });
       } catch (_) {
         _parametersSent = false;
@@ -378,9 +411,11 @@ class TelegramService extends ChangeNotifier {
 
   Future<MusicChat?> channel(int id) async {
     if (_channels[id] case final known?) return known;
+    final client = transport;
     final channel = MusicChat.fromChat(
-      await transport.request({'@type': 'getChat', 'chat_id': id}),
+      await client.request({'@type': 'getChat', 'chat_id': id}),
     );
+    if (!identical(client, transport) || !ready) return null;
     if (channel != null) {
       _channels[id] = channel;
       notifyListeners();
@@ -420,7 +455,21 @@ class TelegramService extends ChangeNotifier {
 
   Future<void> logout() => action(() async {
     await transport.request({'@type': 'logOut'});
+    state = _clientClosed ? 'disconnected' : 'authorizationStateLoggingOut';
+    connection = _clientClosed ? 'Offline' : 'Signing out';
     _channels.clear();
+    clearImageCache();
+    _secrets = {..._secrets}
+      ..remove('apiId')
+      ..remove('apiHash');
+    try {
+      // Keep the database key until TDLib finishes closing its encrypted store.
+      await vault.write(_secrets);
+    } catch (_) {
+      throw StateError(
+        'Signed out, but saved API details could not be cleared. Enter your API ID and hash again before connecting.',
+      );
+    }
   });
 
   Future<void> action(Future<void> Function() operation) async {
