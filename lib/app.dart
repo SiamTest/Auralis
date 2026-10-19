@@ -365,12 +365,36 @@ class _PlayerShellState extends State<PlayerShell> {
           ],
         ),
       ),
-      if (destination == 0)
+      if (destination == 0) ...[
+        PopupMenuButton<LibrarySort>(
+          tooltip: 'Sort Library',
+          icon: const Icon(Icons.sort_rounded),
+          initialValue: player.settings.librarySort,
+          itemBuilder: (context) => [
+            for (final sort in LibrarySort.values)
+              CheckedPopupMenuItem(
+                value: sort,
+                checked: player.settings.librarySort == sort,
+                child: Text(sort.label),
+              ),
+          ],
+          onSelected: (sort) async {
+            setState(() => player.settings.librarySort = sort);
+            try {
+              await player.settings.save();
+            } catch (_) {
+              _notice(
+                'Sort changed for this session. Could not save your preference.',
+              );
+            }
+          },
+        ),
         IconButton(
           onPressed: _openTelegram,
           tooltip: 'Choose channels',
           icon: const Icon(Icons.playlist_add_rounded),
         ),
+      ],
     ],
   );
   Widget _banner(String text) => Container(
@@ -480,13 +504,15 @@ class _PlayerShellState extends State<PlayerShell> {
   );
   Widget _trackList(List<Track> tracks) {
     final query = search.text.toLowerCase();
-    final visible = tracks
-        .where(
-          (t) => '${t.title} ${t.artist} ${t.source}'.toLowerCase().contains(
-            query,
-          ),
-        )
-        .toList();
+    final visible =
+        tracks
+            .where(
+              (t) => '${t.title} ${t.artist} ${t.source}'
+                  .toLowerCase()
+                  .contains(query),
+            )
+            .toList()
+          ..sort(player.settings.librarySort.compare);
     if (visible.isEmpty) {
       return _empty(
         Icons.search_off_rounded,
@@ -531,7 +557,7 @@ class _PlayerShellState extends State<PlayerShell> {
               seed: track.title,
               small: true,
               telegram: telegram,
-              fileId: track.coverFileId,
+              track: track,
             ),
           ),
           title: Text(
@@ -658,6 +684,7 @@ class _PlayerShellState extends State<PlayerShell> {
                           small: true,
                           telegram: telegram,
                           fileId: channels[i].photoFileId,
+                          preview: channels[i].photoPreview,
                         ),
                       ),
                     ),
@@ -789,7 +816,7 @@ class _PlayerShellState extends State<PlayerShell> {
                 child: Artwork(
                   seed: track?.title ?? 'Auralis',
                   telegram: telegram,
-                  fileId: track?.coverFileId,
+                  track: track,
                 ),
               ),
             ),
@@ -983,7 +1010,7 @@ class _PlayerShellState extends State<PlayerShell> {
                   seed: player.current?.title ?? 'Auralis',
                   small: true,
                   telegram: telegram,
-                  fileId: player.current?.coverFileId,
+                  track: player.current,
                 ),
               ),
               const SizedBox(width: 12),
@@ -1107,7 +1134,7 @@ class _PlayerShellState extends State<PlayerShell> {
                   const Divider(),
                 ],
                 Text(
-                  'Auralis ${widget.updater?.currentVersion ?? '0.1.3'} · AGPL-3.0-or-later\nIndependent Flutter interface. Playback by libmpv. Telegram connectivity by TDLib.',
+                  'Auralis ${widget.updater?.currentVersion ?? '0.1.5'} · AGPL-3.0-or-later\nIndependent Flutter interface. Playback by libmpv. Telegram connectivity by TDLib.',
                   style: const TextStyle(
                     color: muted,
                     fontSize: 12,
@@ -1132,7 +1159,7 @@ class _PlayerShellState extends State<PlayerShell> {
             onPressed: () => showLicensePage(
               context: context,
               applicationName: 'Auralis',
-              applicationVersion: widget.updater?.currentVersion ?? '0.1.3',
+              applicationVersion: widget.updater?.currentVersion ?? '0.1.5',
             ),
             child: const Text('Licenses'),
           ),
@@ -1268,7 +1295,7 @@ class _AuthFormState extends State<AuthForm> {
   }
 }
 
-/// Telegram artwork with an original procedural fallback.
+/// Telegram images, tiny previews and embedded covers with a visible fallback.
 class Artwork extends StatelessWidget {
   const Artwork({
     super.key,
@@ -1276,40 +1303,63 @@ class Artwork extends StatelessWidget {
     this.small = false,
     this.telegram,
     this.fileId,
+    this.track,
+    this.preview,
   });
   final String seed;
   final bool small;
   final TelegramService? telegram;
   final int? fileId;
+  final Track? track;
+  final Uint8List? preview;
+
   @override
   Widget build(BuildContext context) {
-    final fallback = CustomPaint(
-      painter: _RecordPainter(seed),
-      child: const SizedBox.expand(),
+    final placeholder = Tooltip(
+      message: track == null ? 'Artwork unavailable' : 'No cover available yet',
+      child: CustomPaint(
+        painter: _RecordPainter(seed),
+        child: const SizedBox.expand(),
+      ),
     );
+    Widget image(ImageProvider provider, Widget fallback) => Image(
+      image: ResizeImage(provider, width: small ? 96 : 640),
+      fit: BoxFit.cover,
+      width: double.infinity,
+      height: double.infinity,
+      errorBuilder: (context, error, stack) => fallback,
+      frameBuilder: (context, child, frame, synchronous) =>
+          frame == null ? fallback : child,
+    );
+    final mini = track?.coverPreview ?? preview;
+    final fallback = mini == null
+        ? placeholder
+        : image(MemoryImage(mini), placeholder);
+    Widget child = fallback;
+    if (telegram != null && track != null) {
+      child = FutureBuilder<Uint8List?>(
+        key: ValueKey((track!.fileId, track!.coverFileId)),
+        future: telegram!.cover(track!),
+        builder: (context, snapshot) =>
+            snapshot.connectionState == ConnectionState.done &&
+                snapshot.data != null
+            ? image(MemoryImage(snapshot.data!), fallback)
+            : fallback,
+      );
+    } else if (telegram != null && fileId != null) {
+      child = FutureBuilder<String?>(
+        key: ValueKey(fileId),
+        future: telegram!.image(fileId!),
+        builder: (context, snapshot) =>
+            snapshot.connectionState == ConnectionState.done &&
+                snapshot.data != null
+            ? image(FileImage(File(snapshot.data!)), fallback)
+            : fallback,
+      );
+    }
     return ClipRRect(
       borderRadius: BorderRadius.circular(small ? 12 : 30),
-      child: fileId == null || telegram == null
-          ? fallback
-          : FutureBuilder<String?>(
-              key: ValueKey(fileId),
-              future: telegram!.image(fileId!),
-              builder: (context, snapshot) {
-                return snapshot.data == null ||
-                        snapshot.connectionState != ConnectionState.done
-                    ? fallback
-                    : Image.file(
-                        File(snapshot.data!),
-                        fit: BoxFit.cover,
-                        width: double.infinity,
-                        height: double.infinity,
-                        cacheWidth: small ? 96 : 640,
-                        errorBuilder: (context, error, stack) => fallback,
-                        frameBuilder: (context, child, frame, synchronous) =>
-                            frame == null ? fallback : child,
-                      );
-              },
-            ),
+      child: child,
     );
   }
 }
