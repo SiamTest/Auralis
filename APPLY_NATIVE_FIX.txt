@@ -1,0 +1,13 @@
+Auralis Windows native shutdown fix
+
+1. Extract auralis-native-shutdown-fix.zip into the existing Auralis repository root (the directory with pubspec.yaml). Replace the supplied files. Include the hidden .github directory and the entire supplied third_party/media_kit directory.
+2. Keep your existing windows/runner header fix. This focused archive contains no Windows runner files and does not touch it.
+3. Commit and push the changed files together, including pubspec.lock and third_party/media_kit/LICENSE. A new branch push starts a fresh Windows workflow automatically.
+4. Do not just click Re-run jobs on the old failed run: it uses the old commit and will not include this fix.
+5. Wait for the new native smoke step to report all three processes exited successfully, then verify the installer artifact after packaging.
+
+The app and standalone smoke test use the same patched MIT media_kit runtime. CI still fails on real native errors; no force-exit or ignored test status is used.
+
+Local checks passed: static analysis; 22 Flutter tests; three native smoke processes with four player shutdowns each. The original CI crash did not reproduce locally, so the fixed GitHub runner still needs verification. No executable or installer is included here. See docs/NATIVE_SHUTDOWN_FIX.md and docs/VERIFICATION.md.
+
+This task has read-only GitHub access and has not pushed this fix to SiamTest/Auralis.
