@@ -57,4 +57,5 @@ local.properties
 native/*.dll
 native/tdlib/
 .native-build/
+.ci-cache/
 dist/
