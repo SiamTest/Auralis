@@ -22,6 +22,18 @@ void main() {
           'duration': 210,
           'file_name': 'night.mp3',
           'mime_type': 'audio/mpeg',
+          'album_cover_thumbnail': {
+            'width': 90,
+            'height': 90,
+            'file': {'id': 90},
+          },
+          'external_album_covers': [
+            {
+              'width': 640,
+              'height': 640,
+              'file': {'id': 91},
+            },
+          ],
           'audio': {'id': 7, 'size': 5000},
         },
       },
@@ -29,15 +41,20 @@ void main() {
     final track = Track.fromMessage(message, 'My channel')!;
     expect(track.title, 'Night drive');
     expect(track.fileId, 7);
+    expect(track.coverFileId, 91);
     expect(track.duration.inSeconds, 210);
     message['content'] = {
       '@type': 'messageDocument',
       'document': {
         'file_name': 'music.FLAC',
+        'thumbnail': {
+          'file': {'id': 92},
+        },
         'document': {'id': 8, 'size': 10},
       },
     };
     expect(Track.fromMessage(message, 'Chat')!.title, 'music');
+    expect(Track.fromMessage(message, 'Chat')!.coverFileId, 92);
     message['content']['document']['file_name'] = 'readme.pdf';
     expect(Track.fromMessage(message, 'Chat'), isNull);
     message['content'] = {'@type': 'messageVoiceNote'};
@@ -51,7 +68,10 @@ void main() {
     final settings = AppSettings(file)
       ..volume = 23
       ..reducedMotion = true
-      ..localFiles = ['C:/Music/song.wav'];
+      ..selectedChannels = [
+        const MusicChat(-20, 'Music'),
+        const MusicChat(-30, 'Albums'),
+      ];
     final first = settings.save();
     settings.volume = 45;
     final last = settings.save();
@@ -60,10 +80,22 @@ void main() {
     await restored.load();
     expect(restored.volume, 45);
     expect(restored.reducedMotion, isTrue);
-    expect(restored.localFiles.single, 'C:/Music/song.wav');
-    await file.writeAsString(jsonEncode({'volume': 200}));
+    expect(restored.selectedChannels.map((c) => c.id), [-20, -30]);
+    expect(restored.selectedChannels.map((c) => c.title), ['Music', 'Albums']);
+    await file.writeAsString(
+      jsonEncode({
+        'volume': 200,
+        'localFiles': ['C:/old.wav'],
+      }),
+    );
     await restored.load();
     expect(restored.volume, 100);
+    expect(restored.selectedChannels, isEmpty);
+    await restored.save();
+    expect(
+      jsonDecode(await file.readAsString()),
+      isNot(contains('localFiles')),
+    );
   });
 
   test(
@@ -96,7 +128,22 @@ void main() {
     final proxy = TelegramStreamProxy((_) async => {});
     final player = PlayerController(audio, proxy, AppSettings(File('unused')));
     addTearDown(player.shutdown);
-    final a = Track.local('C:/a.wav'), b = Track.local('C:/b.wav');
+    const a = Track(
+      id: '1:1',
+      title: 'A',
+      artist: 'Artist',
+      source: 'Music',
+      fileId: 1,
+      size: 100,
+    );
+    const b = Track(
+      id: '1:2',
+      title: 'B',
+      artist: 'Artist',
+      source: 'Music',
+      fileId: 2,
+      size: 100,
+    );
     player.enqueue(a);
     player.enqueue(a);
     player.enqueue(b);
@@ -109,7 +156,7 @@ void main() {
     expect(player.index, 1);
     await player.next();
     expect(player.current, b);
-    expect(audio.uri, b.path);
+    expect(audio.uri, startsWith('http://127.0.0.1:'));
     player.reorder(2, 0);
     expect(player.index, 0);
     expect(player.current, b);
