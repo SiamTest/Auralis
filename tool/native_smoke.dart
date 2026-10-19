@@ -63,6 +63,19 @@ Future<void> main(List<String> arguments) async {
           player.state.duration.inSeconds >= 11,
     );
     final position = player.state.position.inMilliseconds;
+    final appliedVolumes = <double>[];
+    for (final volume in [35.0, 80.0]) {
+      await player.setVolume(volume);
+      final actual = double.parse(await native.getProperty('volume'));
+      if ((actual - volume).abs() > 0.01 || !player.state.playing) {
+        throw StateError('Native volume did not change during playback');
+      }
+      appliedVolumes.add(actual);
+    }
+    report['volume'] = {
+      'duringPlayback': appliedVolumes,
+      'output': 'null (muted)',
+    };
     await player.pause();
     await player.seek(const Duration(seconds: 7));
     await player.play();
