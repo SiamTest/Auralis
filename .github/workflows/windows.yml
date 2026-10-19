@@ -1,0 +1,80 @@
+name: Windows x64 build and release
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: '3.47.1'
+          channel: stable
+          cache: true
+      - name: Resolve locked dependencies
+        run: flutter pub get --enforce-lockfile
+      - name: Validate stable version and tag
+        run: ./tool/package.ps1 -ValidateOnly
+      - name: Static analysis
+        run: flutter analyze --no-pub --fatal-infos
+      - name: Automated tests
+        run: flutter test --no-pub --reporter expanded
+      - name: Build TDLib from pinned source
+        run: ./tool/build-tdlib.ps1 -Jobs 2
+      - name: Windows release build
+        run: flutter build windows --release --no-pub --dart-define=AURALIS_RELEASE_REPOSITORY=$env:GITHUB_REPOSITORY
+      - name: Native encryption, TDLib, playback, proxy and seek smoke test
+        run: |
+          dart run tool/native_smoke.dart `
+            "$PWD/build/windows/x64/runner/Release/libmpv-2.dll" `
+            "$PWD/native/tdjson.dll"
+      - name: Locate Inno Setup
+        run: |
+          if (-not (Test-Path -LiteralPath "${env:ProgramFiles(x86)}/Inno Setup 6/ISCC.exe")) {
+            choco install innosetup --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed' }
+          }
+      - name: Package ZIP, installer, source and checksums
+        run: ./tool/package.ps1 -Installer
+      - name: Save development bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: auralis-windows-x64
+          path: dist/*
+          if-no-files-found: error
+      - name: Save UI preview
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ui-preview
+          path: docs/screenshots/*.png
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: windows-2022
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: auralis-windows-x64
+          path: dist
+      - name: Publish verified release assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./tool/publish-release.ps1
