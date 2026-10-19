@@ -112,6 +112,7 @@ class AppSettings {
   bool reducedMotion = false;
   bool automaticUpdates = true;
   double volume = 70;
+  LibrarySort librarySort = LibrarySort.newest;
   List<MusicChat> selectedChannels = [];
   Future<void> _saving = Future.value();
 
@@ -121,6 +122,10 @@ class AppSettings {
     reducedMotion = json['reducedMotion'] == true;
     automaticUpdates = json['automaticUpdates'] != false;
     volume = (json['volume'] as num? ?? 70).toDouble().clamp(0, 100);
+    librarySort = LibrarySort.values.firstWhere(
+      (value) => value.name == json['librarySort'],
+      orElse: () => LibrarySort.newest,
+    );
     selectedChannels = [
       for (final entry in (json['selectedChannels'] as List? ?? []))
         if (entry is Map && entry['id'] is int && entry['title'] is String)
@@ -134,6 +139,7 @@ class AppSettings {
         'reducedMotion': reducedMotion,
         'automaticUpdates': automaticUpdates,
         'volume': volume,
+        'librarySort': librarySort.name,
         'selectedChannels': [
           for (final channel in selectedChannels)
             {'id': channel.id, 'title': channel.title},
