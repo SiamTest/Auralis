@@ -152,7 +152,10 @@ class TelegramService extends ChangeNotifier {
           _covers.remove(id);
         }
       }
-      if (ready) notifyListeners();
+      // A size-less cover can finish synchronously while Artwork is building.
+      scheduleMicrotask(() {
+        if (ready) notifyListeners();
+      });
     }
   }
 
@@ -313,7 +316,7 @@ class TelegramService extends ChangeNotifier {
           'system_language_code': 'en',
           'device_model': 'Auralis Windows x64',
           'system_version': 'Windows',
-          'application_version': '0.1.7',
+          'application_version': '0.1.12',
         });
       } catch (_) {
         _parametersSent = false;
