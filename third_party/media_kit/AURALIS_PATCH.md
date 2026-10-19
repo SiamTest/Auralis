@@ -8,7 +8,7 @@ Changes by Auralis contributors, 19 October 2026:
 - Unregister the wakeup callback, stop Dart event polling, drain its per-handle event lock, terminate/join the native player in a worker isolate, and only then close the `NativeCallable`.
 - Event callbacks queued before disposal return without polling a removed native handle.
 - Revision `1.2.6+auralis.2` also retains Windows COM's MTA with `CoIncrementMTAUsage` before player creation, keeping its cookie per native handle. It releases that cookie with `CoDecrementMTAUsage` only after native destruction and callback closure. Both HRESULTs are checked. Null-player/failed-initialization paths release their retained COM reference.
-- The first callback-only patch did not fix CI: the supplied second trace still faults at `libmpv-2.dll+0x13fa81`. That address maps to WASAPI hotplug notification unregistration, making COM object lifetime the targeted follow-up. This revision remains unverified on that GitHub runner; no failure is suppressed.
+- The first callback-only patch did not fix CI: the supplied second trace still faults at `libmpv-2.dll+0x13fa81`. That address maps to WASAPI hotplug notification unregistration, making COM object lifetime the targeted follow-up. The COM lifetime revision subsequently passed native smoke tests in GitHub run `39232305284`; no failure is suppressed.
 - Other platforms retain the upstream disposal path. This app targets Windows x64 only.
 
 The fix applies to both the desktop app and standalone smoke tests via a path dependency. Do not substitute a changed global pub cache or suppress the smoke process's exit code. When upgrading media_kit, compare this patch against the upstream shutdown implementation and rerun native shutdown tests.
