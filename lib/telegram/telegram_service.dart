@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
@@ -7,6 +10,7 @@ import 'package:path/path.dart' as p;
 import '../models.dart';
 import '../storage.dart';
 import 'td_transport.dart';
+import 'embedded_cover.dart';
 
 class TelegramService extends ChangeNotifier {
   TelegramService(this.directory, this.vault, {TdTransport? transport})
@@ -26,10 +30,130 @@ class TelegramService extends ChangeNotifier {
   String connection = 'Offline';
   final Map<int, Future<String?>> _images = {};
   int _imageGeneration = 0;
+  final Map<int, Future<Uint8List?>> _covers = {};
+  final Set<int> _coverSuccess = {}, _coverDirty = {};
+  final Map<int, int> _coverPending = {};
+  int _coverJobs = 0;
+  bool Function(int) isStreaming = (_) => false;
 
   void clearImageCache() {
     ++_imageGeneration;
     _images.clear();
+    _covers.clear();
+    _coverSuccess.clear();
+    _coverDirty.clear();
+  }
+
+  Future<Uint8List?> cover(Track track) {
+    final id = track.fileId;
+    if (!ready || id == null) return Future.value(null);
+    if (_covers[id] case final cached?) return cached;
+    if (_coverJobs >= 2) return Future.value(null);
+    if (_covers.length >= 64) {
+      final first = _covers.keys.first;
+      _covers.remove(first);
+      _coverSuccess.remove(first);
+      _coverDirty.remove(first);
+    }
+    ++_coverJobs;
+    final generation = _imageGeneration;
+    _coverPending[id] = generation;
+    return _covers[id] = _loadCover(track, generation);
+  }
+
+  Future<Uint8List?> _loadCover(Track track, int generation) async {
+    final id = track.fileId!;
+    Uint8List? result;
+    bool active() => ready && generation == _imageGeneration;
+    try {
+      if (track.coverFileId case final thumbnail?) {
+        try {
+          final path = await image(thumbnail);
+          if (path != null && active()) {
+            final file = File(path);
+            if (await file.length() <= maxCoverBytes) {
+              final bytes = await file.readAsBytes();
+              if (isCoverImage(bytes)) result = bytes;
+            }
+          }
+        } catch (_) {
+          /* Try the original file's embedded picture. */
+        }
+      }
+      if (result == null && track.size > 0 && active()) {
+        final deadline = DateTime.now().add(const Duration(seconds: 20));
+        Future<Json> metadataRequest(Json request) {
+          final remaining = deadline.difference(DateTime.now());
+          if (!active() || remaining <= Duration.zero) {
+            throw TimeoutException('Artwork timed out');
+          }
+          return transport.request(
+            request,
+            timeout: remaining > const Duration(seconds: 12)
+                ? const Duration(seconds: 12)
+                : remaining,
+          );
+        }
+
+        result = await readEmbeddedCover((offset, count) async {
+          if (!active()) return null;
+          var prefix = await metadataRequest({
+            '@type': 'getFileDownloadedPrefixSize',
+            'file_id': id,
+            'offset': offset,
+          });
+          if (!active()) return null;
+          if ((prefix['size'] as num? ?? 0) < count) {
+            // TDLib has one download offset per file; never move a playing stream.
+            if (isStreaming(id)) return null;
+            await metadataRequest({
+              '@type': 'downloadFile',
+              'file_id': id,
+              'priority': 1,
+              'offset': offset,
+              'limit': count,
+              'synchronous': true,
+            });
+            if (!active()) return null;
+            prefix = await metadataRequest({
+              '@type': 'getFileDownloadedPrefixSize',
+              'file_id': id,
+              'offset': offset,
+            });
+            if ((prefix['size'] as num? ?? 0) < count) return null;
+          }
+          final bytes = BytesBuilder(copy: false);
+          while (bytes.length < count && active()) {
+            final length = min(128 * 1024, count - bytes.length);
+            final part = await metadataRequest({
+              '@type': 'readFilePart',
+              'file_id': id,
+              'offset': offset + bytes.length,
+              'count': length,
+            });
+            final data = base64Decode(part['data'] as String);
+            if (data.length != length) return null;
+            bytes.add(data);
+          }
+          return active() ? bytes.takeBytes() : null;
+        }, track.size);
+      }
+      return active() ? result : null;
+    } catch (_) {
+      return null;
+    } finally {
+      --_coverJobs;
+      if (_coverPending[id] == generation) _coverPending.remove(id);
+      if (active()) {
+        if (result != null) {
+          _coverSuccess.add(id);
+          _coverDirty.remove(id);
+        } else if (_coverDirty.remove(id)) {
+          _covers.remove(id);
+        }
+      }
+      if (ready) notifyListeners();
+    }
   }
 
   Future<String?> image(int fileId) {
@@ -121,6 +245,7 @@ class TelegramService extends ChangeNotifier {
             id,
             json['title'] as String,
             photoFileId: _channels[id]!.photoFileId,
+            photoPreview: _channels[id]!.photoPreview,
           );
           notifyListeners();
         }
@@ -131,6 +256,9 @@ class TelegramService extends ChangeNotifier {
             id,
             channel.title,
             photoFileId: json['photo']?['small']?['id'] as int?,
+            photoPreview: decodePreview(
+              json['photo']?['minithumbnail']?['data'],
+            ),
           );
           notifyListeners();
         }
@@ -142,6 +270,16 @@ class TelegramService extends ChangeNotifier {
           _ => 'Connecting',
         };
         notifyListeners();
+      case 'updateFile':
+        final id = (json['file'] as Json)['id'] as int;
+        if (_covers.containsKey(id) && !_coverSuccess.contains(id)) {
+          if (_coverPending[id] == _imageGeneration) {
+            _coverDirty.add(id);
+          } else {
+            _covers.remove(id);
+            notifyListeners();
+          }
+        }
     }
   }
 
@@ -175,7 +313,7 @@ class TelegramService extends ChangeNotifier {
           'system_language_code': 'en',
           'device_model': 'Auralis Windows x64',
           'system_version': 'Windows',
-          'application_version': '0.1.3',
+          'application_version': '0.1.5',
         });
       } catch (_) {
         _parametersSent = false;
