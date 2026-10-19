@@ -8,7 +8,7 @@ An independently authored Flutter desktop player with a compact violet/charcoal 
 
 **Source milestone, not yet a verified installable Windows release.** Flutter analysis and automated tests ran on Windows 11 x64. Real TDLib initialization/shutdown, Windows DPAPI, libmpv decoding/playback/seeking, and playback through the loopback proxy were exercised separately. See [verification](docs/VERIFICATION.md) for exact results and limits.
 
-The local executable build is blocked: Visual Studio C++ Build Tools are absent. Microsoft's signed installer exited with code 1602 after Windows elevation was unavailable/declined. `flutter build windows --release` reports no suitable Visual Studio toolchain. No EXE, portable binary bundle, signed package, or installer is included. The checked-in workflow and native source-build script have **not** run on GitHub Actions yet.
+The local executable build is blocked: Visual Studio C++ Build Tools are absent. Microsoft's signed installer exited with code 1602 after Windows elevation was unavailable/declined. No EXE, portable binary bundle, signed package, or installer is included. The first GitHub Actions run built TDLib and the Flutter Windows app, then crashed in libmpv during smoke-test shutdown before packaging. This source includes a Windows shutdown fix and stronger native regression checks; the fixed revision still needs a GitHub Actions run. See [shutdown fix](docs/NATIVE_SHUTDOWN_FIX.md).
 
 Implemented:
 
@@ -33,7 +33,7 @@ Not implemented or not verified:
 
 Use **Windows x64**, Flutter **3.47.1** / Dart **3.13.1**, Git, PowerShell **7.4+**, CMake, and **Visual Studio 2022** (or Build Tools 2022) with **Desktop development with C++**, the MSVC x64 toolset, and Windows SDK. Install these tools using their official installers, then check `flutter doctor -v`.
 
-Pinned Dart dependencies and their transitive versions are in `pubspec.yaml` and `pubspec.lock`: Flutter, media_kit 1.2.6, media_kit_libs_windows_audio 1.0.9, ffi 2.2.0, file_selector 1.1.0, path 1.9.1, path_provider 2.1.6, package_info_plus 10.2.1, and crypto 3.0.7. TDLib is built separately; no third-party Dart Telegram wrapper is used.
+Pinned Dart dependencies and their transitive versions are in `pubspec.yaml` and `pubspec.lock`: Flutter, media_kit 1.2.6+auralis.1 (vendored MIT runtime with a Windows shutdown patch), media_kit_libs_windows_audio 1.0.9, ffi 2.2.0, file_selector 1.1.0, path 1.9.1, path_provider 2.1.6, package_info_plus 10.2.1, and crypto 3.0.7. TDLib is built separately; no third-party Dart Telegram wrapper is used. Keep `third_party/media_kit` in Git with the app; its patch and original license are included there.
 
 From this directory:
 
@@ -43,7 +43,7 @@ flutter analyze --fatal-infos
 flutter test --reporter expanded
 pwsh ./tool/build-tdlib.ps1 -Jobs 2
 flutter build windows --release
-dart run tool/native_smoke.dart `
+dart run tool/native_smoke_repeat.dart `
   "$PWD/build/windows/x64/runner/Release/libmpv-2.dll" `
   "$PWD/native/tdjson.dll"
 pwsh ./tool/package.ps1
@@ -81,7 +81,7 @@ Tests use generated audio and synthetic metadata only. Flutter UI previews are r
 
 ## GitHub Actions
 
-Commit this **project directory as the repository root** of [SiamTest/Auralis](https://github.com/SiamTest/Auralis), retaining `.github/workflows/windows.yml`. The workflow targets `windows-2022`, uses pinned action commits and Flutter 3.47.1, runs analysis/tests, builds TDLib from pinned source, builds Flutter Windows x64, runs native smoke tests, and uploads ZIP/installer/source/checksum artifacts. No Telegram secrets are needed. The current GitHub connection has READ permission only; this delivery has not uploaded files or run CI there.
+Use this **project directory as the repository root** of [SiamTest/Auralis](https://github.com/SiamTest/Auralis), retaining `.github/workflows/windows.yml`. The workflow targets `windows-2022`, uses pinned action commits and Flutter 3.47.1, runs analysis/tests, builds TDLib from pinned source, builds Flutter Windows x64, runs native smoke tests, and uploads ZIP/installer/source/checksum artifacts. No Telegram secrets are needed. The current GitHub connection has READ permission only; this task inspected the first failed run but has not pushed the shutdown fix or started another run.
 
 Pushing a matching stable `v*` version tag automatically publishes a GitHub Release after successful checks and server-side digest verification. Ordinary pushes/PRs create artifacts only. The app checks stable releases automatically, downloads after a user click, and requires confirmation to install/restart. Installers remain unsigned. See [UPDATES.md](docs/UPDATES.md) for setup, exact commands, security properties, and test limits. Complete the native corresponding-source/license audit before pushing a public release tag, and verify the first full CI run plus a clean-machine installation before calling it executable-tested.
 
