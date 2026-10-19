@@ -119,6 +119,28 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       final boundary = GlobalKey();
+      void expectSortPosition() {
+        final button = tester.getRect(
+          find.byType(PopupMenuButton<LibrarySort>),
+        );
+        final first = tester.getRect(
+          find.widgetWithText(
+            CheckedPopupMenuItem<LibrarySort>,
+            'Newest first',
+          ),
+        );
+        final last = tester.getRect(
+          find.widgetWithText(
+            CheckedPopupMenuItem<LibrarySort>,
+            'Duration (shortest first)',
+          ),
+        );
+        expect(first.top, greaterThanOrEqualTo(button.bottom));
+        expect(first.left, greaterThanOrEqualTo(0));
+        expect(first.right, lessThanOrEqualTo(tester.view.physicalSize.width));
+        expect(last.bottom, lessThanOrEqualTo(tester.view.physicalSize.height));
+      }
+
       await tester.pumpWidget(
         RepaintBoundary(
           key: boundary,
@@ -163,10 +185,18 @@ void main() {
       await tester.pumpAndSettle();
       expect(telegram.channels.map((c) => c.photoFileId), [90, 90]);
       expect(find.byType(Image), findsNWidgets(2));
-      await tester.tap(find.text('Channel -1'));
-      await tester.pumpAndSettle();
       await tester.tap(find.text('Channel -2'));
       await tester.pumpAndSettle();
+      expect(
+        tester.getTopLeft(find.text('Channel -2')).dy,
+        lessThan(tester.getTopLeft(find.text('Channel -1')).dy),
+      );
+      await tester.tap(find.text('Channel -1'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.getTopLeft(find.text('Channel -1')).dy,
+        lessThan(tester.getTopLeft(find.text('Channel -2')).dy),
+      );
       expect(player.settings.selectedChannels, hasLength(2));
       await tester.tap(find.text('Open Library (2)'));
       await tester.pumpAndSettle();
@@ -175,6 +205,7 @@ void main() {
       expect(find.text('Choose audio files'), findsNothing);
       await tester.tap(find.byTooltip('Sort Library'));
       await tester.pumpAndSettle();
+      expectSortPosition();
       await tester.tap(
         find.widgetWithText(CheckedPopupMenuItem<LibrarySort>, 'Oldest first'),
       );
@@ -209,8 +240,21 @@ void main() {
       await tester.pumpAndSettle();
       expect(audio.uri, startsWith('http://127.0.0.1:'));
       expect(player.current?.title, 'Song -1');
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Sort Library'));
       await tester.pumpAndSettle();
+      expectSortPosition();
+      await tester.runAsync(() async {
+        final render =
+            boundary.currentContext!.findRenderObject()!
+                as RenderRepaintBoundary;
+        final image = await render.toImage();
+        final data = await image.toByteData(format: ui.ImageByteFormat.png);
+        await File('docs/screenshots/sort-menu.png')
+            .writeAsBytes(data!.buffer.asUint8List());
+        image.dispose();
+      });
       await tester.tap(
         find.widgetWithText(CheckedPopupMenuItem<LibrarySort>, 'Artist (A–Z)'),
       );
@@ -237,6 +281,7 @@ void main() {
         expect(tester.takeException(), isNull);
         await tester.tap(find.byTooltip('Sort Library'));
         await tester.pumpAndSettle();
+        expectSortPosition();
         expect(find.text('Duration (shortest first)'), findsOneWidget);
         expect(tester.takeException(), isNull);
         await tester.tap(
@@ -257,6 +302,10 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Channel -1').first);
       await tester.pumpAndSettle();
+      expect(
+        tester.getTopLeft(find.text('Channel -2')).dy,
+        lessThan(tester.getTopLeft(find.text('Channel -1')).dy),
+      );
       await tester.tap(find.text('Open Library (1)'));
       await tester.pumpAndSettle();
       expect(find.byTooltip('Add Song -1 to queue'), findsNothing);
