@@ -1,10 +1,12 @@
-Complete Auralis project — v0.1.12+13
+Complete Auralis project — v0.1.13+14
 
 This is the FULL project with files at the ZIP root, including all earlier playback, artwork, channel selection, caching, publishing and updater fixes.
 
 1. Extract this ZIP.
 2. Upload all extracted files/folders into the SiamTest/Auralis repository root, including .github, lib, windows, test, tool, third_party, native, docs, LICENSE, pubspec.yaml and pubspec.lock. Upload the full extracted project, not only the ZIP or changed files.
-3. Commit to main. The workflow checks, builds, tests and packages Windows x64, then publishes stable v0.1.12 after verifying asset checksums. Existing tags and published releases are never overwritten. Later releases require a new stable version, such as 0.1.13+14.
+3. Commit to main. The workflow checks, builds, tests and packages Windows x64, then publishes stable v0.1.13 after verifying asset checksums. Existing tags and published releases are never overwritten. Later releases require a new stable version, such as 0.1.14+15.
+
+Logout fix: Settings > Sign out stops playback and clears the queue. When Telegram accepts logout, saved API ID/hash and old channel selections are removed. Wait for Telegram to close, then enter API ID/hash again in the blank form. The next phone/code/2FA sign-in uses a fresh client without restarting Auralis. Failed logout preserves configuration/selection and shows an error. The database key is retained; Auralis does not recursively remove app-data folders. Normal app restarts while signed in still remember the existing configuration. Three real native clients were opened/closed before account initialization, but switching two live accounts remains unverified.
 
 Lyrics: open Now Playing and click Lyrics. Synced mode highlights/follows the current line; click a line to seek. Mouse scrolling pauses following; Follow song resumes it. Static shows selectable text. Find lyrics sends only song title, artist and duration to LRCLIB after a click. No Telegram account/channel data is sent. Paste plain text or line-timed LRC as an alternative. Results/pasted text live in a bounded session-only cache; no embedded lyric tags, word-level karaoke or automatic translation. Missing/incorrect provider matches may need pasted lyrics. PixelPlayer is a visual reference only.
 
@@ -12,6 +14,6 @@ Telegram: selected channels stay at the top, then all groups sort alphabetically
 
 Caching/release: the TDLib builder and stable compiled DLL cache key are unchanged. Flutter SDK/Pub, native/Dart intermediates and vcpkg caches remain enabled. Every check/build/package step still runs. The stable publisher preserves the draft numeric-ID repair and never rewrites published versions. Commit the new project to main; rerunning an older commit cannot use these changes.
 
-Verification: all 95 tests passed; analysis is clean. A live HTTPS lyrics lookup using the provider's public example returned 47 synced lines. Responsive screenshots use original test text and procedural artwork. The full archive is integrity-checked, extracted and version-validated.
+Verification: all 101 tests passed; analysis is clean. A live HTTPS lyrics lookup using the provider's public example returned 47 synced lines. Responsive screenshots use original test text and procedural artwork. The full archive is integrity-checked, extracted and version-validated.
 
 This is SOURCE, with no EXE/installer. Windows C++ Build Tools are absent here. Nothing has been pushed or published from this workspace. A new GitHub Windows build, installation, live Telegram playback and hardware checks remain required. See README.md, docs/VERIFICATION.md and docs/UPDATES.md for details and existing native redistribution/security limits.
