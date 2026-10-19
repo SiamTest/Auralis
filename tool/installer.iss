@@ -23,6 +23,7 @@ OutputBaseFilename=auralis-{#AuralisVersion}-windows-x64-setup
 Compression=lzma2
 SolidCompression=yes
 LicenseFile=..\LICENSE
+SetupIconFile=..\windows\runner\resources\app_icon.ico
 UninstallDisplayIcon={app}\auralis.exe
 CloseApplications=yes
 RestartApplications=no
