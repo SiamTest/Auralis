@@ -1,0 +1,275 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+
+import 'package:auralis/app.dart';
+import 'package:auralis/models.dart';
+import 'package:auralis/player.dart';
+import 'package:auralis/telegram/stream_proxy.dart';
+import 'package:auralis/telegram/telegram_service.dart';
+import 'package:auralis/wave_seek_bar.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import 'fakes.dart';
+
+void main() {
+  setUpAll(() async {
+    final font = File('C:/Windows/Fonts/segoeui.ttf');
+    if (font.existsSync()) {
+      await (FontLoader('Segoe UI')
+            ..addFont(font.readAsBytes().then((b) => ByteData.sublistView(b))))
+          .load();
+    }
+    await (FontLoader(
+      'MaterialIcons',
+    )..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'))).load();
+  });
+  WaveTrack shape(WidgetTester tester) =>
+      tester
+              .widget<SliderTheme>(
+                find
+                    .descendant(
+                      of: find.byType(WaveSeekBar),
+                      matching: find.byType(SliderTheme),
+                    )
+                    .first,
+              )
+              .data
+              .trackShape!
+          as WaveTrack;
+
+  Widget wave({
+    bool playing = true,
+    bool reduced = false,
+    bool systemReduced = false,
+  }) => MaterialApp(
+    home: MediaQuery(
+      data: MediaQueryData(disableAnimations: systemReduced),
+      child: Scaffold(
+        body: WaveSeekBar(
+          value: .6,
+          buffered: .8,
+          playing: playing,
+          reducedMotion: reduced,
+          format: (v) => '$v',
+          onChanged: (_) {},
+        ),
+      ),
+    ),
+  );
+
+  testWidgets('wave animates only during playback and freezes when paused', (
+    tester,
+  ) async {
+    await tester.pumpWidget(wave());
+    await tester.pump(const Duration(milliseconds: 80));
+    final first = shape(tester).phase;
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(shape(tester).phase, isNot(first));
+    await tester.pumpWidget(wave(playing: false));
+    final paused = shape(tester).phase;
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(shape(tester).phase, paused);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('user and system reduced motion disable the wave ticker', (
+    tester,
+  ) async {
+    for (final system in [false, true]) {
+      await tester.pumpWidget(wave(reduced: !system, systemReduced: system));
+      await tester.pumpAndSettle();
+      final phase = shape(tester).phase;
+      expect(shape(tester).amplitude, 0);
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(shape(tester).phase, phase);
+      expect(tester.binding.hasScheduledFrame, isFalse);
+    }
+  });
+
+  testWidgets(
+    'current-track navigation, seeking and controls survive adaptive window sizes',
+    (tester) async {
+      final art = File('test/fixtures/cover.png').readAsBytesSync();
+      final td = FakeTd();
+      td.onRequest = (r) async {
+        if (r['@type'] == 'getChat') {
+          return {
+            'id': -1,
+            'title': 'Music channel',
+            'type': {'@type': 'chatTypeSupergroup', 'is_channel': true},
+          };
+        }
+        if (r['@type'] == 'searchChatMessages') {
+          return {
+            'next_from_message_id': 0,
+            'messages': r['filter']['@type'] == 'searchMessagesFilterDocument'
+                ? []
+                : [
+                    {
+                      'id': 1,
+                      'chat_id': -1,
+                      'content': {
+                        '@type': 'messageAudio',
+                        'audio': {
+                          'title': 'Evening waves',
+                          'performer': 'Auralis test artist',
+                          'file_name': 'waves.mp3',
+                          'audio': {'id': 1, 'size': 0},
+                        },
+                      },
+                    },
+                  ],
+          };
+        }
+        return null;
+      };
+      final telegram = TelegramService(
+        Directory('unused'),
+        MemoryVault(),
+        transport: td,
+      )..state = 'authorizationStateReady';
+      final settings = MemorySettings()
+        ..reducedMotion = true
+        ..selectedChannels = [const MusicChat(-1, 'Music channel')];
+      final audio = FakeAudio()
+        ..duration = const Duration(minutes: 4)
+        ..position = const Duration(minutes: 2)
+        ..buffered = const Duration(minutes: 3)
+        ..playing = true;
+      final player =
+          PlayerController(
+              audio,
+              TelegramStreamProxy((_) async => {}),
+              settings,
+            )
+            ..queue.add(
+              Track(
+                id: 'current',
+                title: 'Evening waves',
+                artist: 'Auralis test artist',
+                source: 'Music channel',
+                coverPreview: art,
+              ),
+            )
+            ..index = 0;
+      addTearDown(() async {
+        await player.shutdown();
+        await telegram.shutdown();
+      });
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final boundary = GlobalKey();
+      await tester.pumpWidget(const MaterialApp(home: SizedBox()));
+      await tester.runAsync(() async {
+        final context = tester.element(find.byType(MaterialApp));
+        await precacheImage(ResizeImage(MemoryImage(art), width: 96), context);
+        if (context.mounted) {
+          await precacheImage(
+            ResizeImage(MemoryImage(art), width: 640),
+            context,
+          );
+        }
+      });
+      final sizes = [
+        const Size(360, 480),
+        const Size(520, 560),
+        const Size(760, 650),
+        const Size(900, 480),
+        const Size(1000, 700),
+        const Size(1280, 800),
+        const Size(1920, 1080),
+      ];
+      for (final size in sizes) {
+        tester.view.physicalSize = size;
+        await tester.pumpWidget(
+          RepaintBoundary(
+            key: boundary,
+            child: AuralisApp(player: player, telegram: telegram),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull, reason: '$size Library');
+        expect(
+          find.byType(NavigationBar),
+          size.width < 900 ? findsOneWidget : findsNothing,
+        );
+        expect(find.byKey(const ValueKey('volume-slider')), findsOneWidget);
+        final seek = find.byKey(const ValueKey('playback-seek'));
+        await tester.tapAt(tester.getCenter(seek) + const Offset(18, 0));
+        await tester.pumpAndSettle();
+        expect(audio.position, greaterThan(const Duration(minutes: 2)));
+        final beforeKey = audio.position;
+        final focus = tester.widget<FocusableActionDetector>(
+          find
+              .descendant(
+                of: seek,
+                matching: find.byType(FocusableActionDetector),
+              )
+              .first,
+        );
+        focus.focusNode!.requestFocus();
+        await tester.pump();
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+        await tester.pumpAndSettle();
+        expect(audio.position, greaterThan(beforeKey));
+        expect(
+          tester.widget<Text>(find.byKey(const ValueKey('page-title'))).data,
+          'Library',
+        );
+        await tester.tap(find.byKey(const ValueKey('open-current-track')));
+        await tester.pumpAndSettle();
+        expect(
+          tester.widget<Text>(find.byKey(const ValueKey('page-title'))).data,
+          'Now playing',
+        );
+        expect(audio.playing, isTrue);
+        expect(tester.takeException(), isNull, reason: '$size Now Playing');
+        await tester.tap(find.byTooltip('Library').first);
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('Settings').first);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull, reason: '$size Settings');
+        await tester.tap(find.text('Done'));
+        await tester.pumpAndSettle();
+        for (final tab in ['Telegram', 'Play queue']) {
+          await tester.tap(find.byTooltip(tab).first);
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull, reason: '$size $tab');
+        }
+        await tester.tap(find.byTooltip('Library').first);
+        await tester.pumpAndSettle();
+        if (size.width == 360 || size.width == 1280) {
+          settings.reducedMotion = false;
+          await player.setVolume(settings.volume, persist: false);
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 220));
+          await tester.runAsync(() async {
+            final render =
+                boundary.currentContext!.findRenderObject()!
+                    as RenderRepaintBoundary;
+            final image = await render.toImage();
+            final bytes = await image.toByteData(
+              format: ui.ImageByteFormat.png,
+            );
+            await File('docs/screenshots/adaptive-${size.width.toInt()}.png')
+                .writeAsBytes(bytes!.buffer.asUint8List());
+            image.dispose();
+          });
+          settings.reducedMotion = true;
+          await player.setVolume(settings.volume, persist: false);
+          await tester.pumpAndSettle();
+        }
+      }
+      tester.view.physicalSize = const Size(760, 650);
+      tester.platformDispatcher.textScaleFactorTestValue = 1.3;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: '130% text');
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+}
