@@ -52,6 +52,10 @@ Future<void> main(List<String> arguments) async {
     final native = player.platform as NativePlayer;
     // Null audio output permits playback verification on headless CI workers.
     await native.setProperty('ao', 'null');
+    // Exercise WASAPI device monitoring even with null audio output on CI.
+    final devices = await native.getProperty('audio-device-list');
+    if (devices.isEmpty) throw StateError('Native audio-device query failed');
+    report['deviceMonitoring'] = 'audio-device-list queried before shutdown';
     await player.open(Media(wave.path));
     await waitFor(
       () =>
@@ -109,6 +113,7 @@ Future<void> main(List<String> arguments) async {
       'requests': requests,
       'seekPositionMs': player.state.position.inMilliseconds,
     };
+    stderr.writeln('Native shutdown cycle 1/4 (loopback playback)');
     await player.dispose();
     player = null;
     // Recreate and dispose during active seeking to exercise queued callbacks.
@@ -118,6 +123,7 @@ Future<void> main(List<String> arguments) async {
       await player.open(Media(wave.path));
       await waitFor(() => player!.state.position.inMilliseconds > 50);
       await player.seek(const Duration(seconds: 4));
+      stderr.writeln('Native shutdown cycle ${cycle + 2}/4 (active seek)');
       await player.dispose();
       player = null;
     }
