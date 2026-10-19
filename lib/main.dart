@@ -48,28 +48,29 @@ Future<void> main() async {
     );
     final package = await PackageInfo.fromPlatform();
     telegram.isStreaming = player.proxy.isStreaming;
-    final updater = AppUpdater(
+    late final AppUpdater updater;
+    Future<void>? shutdownFuture;
+    Future<void> shutdown() => shutdownFuture ??= () async {
+      try {
+        await player.shutdown();
+      } finally {
+        try {
+          await telegram.shutdown();
+        } finally {
+          await lock?.close();
+        }
+      }
+      updater.dispose();
+    }();
+    updater = AppUpdater(
       currentVersion: package.version,
       directory: Directory(p.join(root.path, 'updates')),
       settings: settings,
-      requestExit: () async =>
-          await ServicesBinding.instance.exitApplication(
-            AppExitType.cancelable,
-          ) ==
-          AppExitResponse.exit,
+      requestExit: () => exitForUpdate(shutdown),
     );
     AppLifecycleListener(
       onExitRequested: () async {
-        try {
-          await player.shutdown();
-        } finally {
-          try {
-            await telegram.shutdown();
-          } finally {
-            updater.dispose();
-            await lock?.close();
-          }
-        }
+        await shutdown();
         return AppExitResponse.exit;
       },
     );
@@ -103,4 +104,11 @@ Future<void> main() async {
       ),
     );
   }
+}
+
+Future<bool> exitForUpdate(Future<void> Function() shutdown) async {
+  await shutdown();
+  // Windows acknowledges cancelable exits before the shutdown decision completes.
+  await ServicesBinding.instance.exitApplication(AppExitType.required);
+  return true;
 }
