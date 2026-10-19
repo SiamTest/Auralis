@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -6,6 +7,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:auralis/app.dart';
+import 'package:auralis/models.dart';
 import 'package:auralis/player.dart';
 import 'package:auralis/storage.dart';
 import 'package:auralis/telegram/stream_proxy.dart';
@@ -13,6 +15,7 @@ import 'package:auralis/telegram/telegram_service.dart';
 import 'package:auralis/updater.dart';
 
 import 'fakes.dart';
+import 'fixtures/cover_data.dart';
 
 void main() {
   setUpAll(() async {
@@ -54,8 +57,21 @@ void main() {
           },
         });
       }
-      final photoPath = File('assets/branding/auralis.png').absolute.path;
+      final photoPath = File('test/fixtures/cover.png').absolute.path;
+      final coverPng = File(photoPath).readAsBytesSync();
+      final fileBytes = id3(coverPng);
       td.onRequest = (r) async {
+        if (r['@type'] == 'getFileDownloadedPrefixSize') {
+          return {'size': fileBytes.length - (r['offset'] as int)};
+        }
+        if (r['@type'] == 'readFilePart') {
+          final offset = r['offset'] as int;
+          return {
+            'data': base64Encode(
+              fileBytes.sublist(offset, offset + (r['count'] as int)),
+            ),
+          };
+        }
         if (r['@type'] == 'downloadFile') {
           return {
             'local': {'path': photoPath, 'is_downloading_completed': true},
@@ -70,16 +86,14 @@ void main() {
                     {
                       'chat_id': r['chat_id'],
                       'id': 1,
+                      'date': r['chat_id'] == -1 ? 200 : 100,
                       'content': {
                         '@type': 'messageAudio',
                         'audio': {
                           'title': 'Song ${r['chat_id']}',
                           'performer': 'Artist',
                           'file_name': 'song.mp3',
-                          'album_cover_thumbnail': {
-                            'file': {'id': 90},
-                          },
-                          'audio': {'id': 1, 'size': 100},
+                          'audio': {'id': 1, 'size': fileBytes.length},
                         },
                       },
                     },
@@ -94,6 +108,7 @@ void main() {
         TelegramStreamProxy((_) async => {}),
         MemorySettings(),
       );
+      telegram.isStreaming = player.proxy.isStreaming;
       addTearDown(() async {
         await player.shutdown();
         await telegram.shutdown();
@@ -112,9 +127,20 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('Choose your music channels'), findsOneWidget);
-      // The original app icon is a local image fixture, not real channel/album artwork.
+      // Original test artwork is embedded in an MP3 with no Telegram thumbnail.
       await tester.runAsync(() async {
         expect(await telegram.image(90), photoPath);
+        final bytes = await telegram.cover(
+          Track(
+            id: 'fixture',
+            title: 'Fixture',
+            artist: 'Artist',
+            source: 'Channel',
+            fileId: 1,
+            size: fileBytes.length,
+          ),
+        );
+        expect(bytes, coverPng);
         final context = tester.element(find.byType(MaterialApp));
         await precacheImage(
           ResizeImage(FileImage(File(photoPath)), width: 96),
@@ -122,7 +148,12 @@ void main() {
         );
         if (!context.mounted) return;
         await precacheImage(
-          ResizeImage(FileImage(File(photoPath)), width: 640),
+          ResizeImage(MemoryImage(bytes!), width: 96),
+          context,
+        );
+        if (!context.mounted) return;
+        await precacheImage(
+          ResizeImage(MemoryImage(bytes), width: 640),
           context,
         );
       });
@@ -142,6 +173,27 @@ void main() {
       expect(find.byTooltip('Add Song -1 to queue'), findsOneWidget);
       expect(find.byTooltip('Add Song -2 to queue'), findsOneWidget);
       expect(find.text('Choose audio files'), findsNothing);
+      await tester.tap(find.byTooltip('Sort Library'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.widgetWithText(CheckedPopupMenuItem<LibrarySort>, 'Oldest first'),
+      );
+      await tester.pumpAndSettle();
+      expect(player.settings.librarySort, LibrarySort.oldest);
+      expect(
+        tester.getTopLeft(find.text('Song -2')).dy,
+        lessThan(tester.getTopLeft(find.text('Song -1')).dy),
+      );
+      await tester.tap(find.byTooltip('Sort Library'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.widgetWithText(CheckedPopupMenuItem<LibrarySort>, 'Title (A–Z)'),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.getTopLeft(find.text('Song -1')).dy,
+        lessThan(tester.getTopLeft(find.text('Song -2')).dy),
+      );
       await tester.enterText(find.byType(TextField).first, 'Channel -2');
       await tester.pumpAndSettle();
       expect(find.byTooltip('Add Song -1 to queue'), findsNothing);
@@ -157,6 +209,15 @@ void main() {
       await tester.pumpAndSettle();
       expect(audio.uri, startsWith('http://127.0.0.1:'));
       expect(player.current?.title, 'Song -1');
+      await tester.tap(find.byTooltip('Sort Library'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.widgetWithText(CheckedPopupMenuItem<LibrarySort>, 'Artist (A–Z)'),
+      );
+      await tester.pumpAndSettle();
+      expect(player.settings.librarySort, LibrarySort.artist);
+      expect(player.current?.title, 'Song -1');
+      expect(player.queue, hasLength(1));
       expect(find.byType(Image), findsNWidgets(4));
       expect(tester.takeException(), isNull);
       await tester.pump(const Duration(seconds: 5));
@@ -174,6 +235,18 @@ void main() {
         tester.view.physicalSize = size;
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
+        await tester.tap(find.byTooltip('Sort Library'));
+        await tester.pumpAndSettle();
+        expect(find.text('Duration (shortest first)'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        await tester.tap(
+          find.widgetWithText(
+            CheckedPopupMenuItem<LibrarySort>,
+            'Duration (shortest first)',
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(player.settings.librarySort, LibrarySort.duration);
         await tester.tap(find.byTooltip('Telegram').first);
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
