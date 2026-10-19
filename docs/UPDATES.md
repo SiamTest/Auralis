@@ -1,30 +1,30 @@
 # GitHub Releases and application updates
 
-Configured repository: **[SiamTest/Auralis](https://github.com/SiamTest/Auralis)**. Current source target is **v0.1.12**, including the synchronized/static lyrics page, selected-first Telegram channel ordering, the animated seek control and adaptive player plus all earlier fixes. Commit the complete source to main to run the updated Windows build and stable publisher; rerunning an older commit cannot apply it. No source or release was pushed/published from this workspace.
+Configured repository: **[SiamTest/Auralis](https://github.com/SiamTest/Auralis)**. Current source target is **v0.1.13**, including fresh API entry/client recreation after logout, the synchronized/static lyrics page, selected-first Telegram channel ordering, the animated seek control and adaptive player plus all earlier fixes. Commit the complete source to main to run the updated Windows build and stable publisher; rerunning an older commit cannot apply it. No source or release was pushed/published from this workspace.
 
 ## Release flow
 
 1. Upload the complete project as the repository root, including `.github`, `pubspec.lock`, tests, native notices and the vendored runtime. A push to `main` runs the Windows build/test/package job and, after success, the stable publisher. A manual run on `main` does the same. Other branches and pull requests produce artifacts only.
 2. Analysis, automated tests, native smoke tests and installer packaging must succeed. The job packages a portable ZIP, per-user Inno Setup installer, application source ZIP from the committed revision, and `SHA256SUMS.txt`.
-3. The publisher reads the stable version from `pubspec.yaml`. For the current `0.1.12+13`, it creates `v0.1.12` at the exact tested commit if that tag is absent. No manual tag is required. An existing tag must already resolve to the tested commit; it is never moved. Explicit stable tag builds remain supported and must match `pubspec.yaml`.
+3. The publisher reads the stable version from `pubspec.yaml`. For the current `0.1.13+14`, it creates `v0.1.13` at the exact tested commit if that tag is absent. No manual tag is required. An existing tag must already resolve to the tested commit; it is never moved. Explicit stable tag builds remain supported and must match `pubspec.yaml`.
 4. Using the publishing job's `GITHUB_TOKEN` with `contents: write`, it creates an unpublished draft with `--prerelease=false`. It resolves the draft-aware CLI lookup's numeric `databaseId`, checks that the corresponding REST release has the intended tag and remains a non-prerelease draft, then uploads all four assets. It refreshes metadata by numeric ID, verifies GitHub's SHA-256 asset digests, then publishes with `--draft=false --prerelease=false`. It never uses the published-only by-tag REST route to verify a draft. The newest stable version is marked Latest; releasing an older version preserves a newer Latest. Build permissions remain read-only, and publishing jobs serialize to avoid concurrent tag/asset updates.
-5. Published versions are immutable. A later push with the same version reports that it is already stable and skips release mutation. For the next app update, bump `pubspec.yaml` to a new stable version, such as `0.1.13+14`, and commit to `main`; it automatically publishes `v0.1.13` after successful checks. A build-number-only change does not create a new stable release. An existing published prerelease is not silently overwritten; use a new stable version.
+5. Published versions are immutable. A later push with the same version reports that it is already stable and skips release mutation. For the next app update, bump `pubspec.yaml` to a new stable version, such as `0.1.14+15`, and commit to `main`; it automatically publishes `v0.1.14` after successful checks. A build-number-only change does not create a new stable release. An existing published prerelease is not silently overwritten; use a new stable version.
 
 Optional tag-based release after completing the native distribution audit:
 
 ```powershell
-git tag v0.1.12
-git push origin v0.1.12
+git tag v0.1.13
+git push origin v0.1.13
 ```
 
-Tags such as `v0.1.3-beta`, mismatched versions, pull requests, other branches and mismatched checkout commits cannot publish. Existing drafts may resume only at their original tested tag/commit; a failed digest check leaves the draft unpublished. GitHub API permission/network errors fail explicitly instead of being treated as a missing release. An `untagged-…` URL is normal for an unpublished draft; it is not a reason to delete or move the version tag. The failed `v0.1.3` draft may remain; the new source uses `v0.1.12` because the existing version tag points to the previous tested commit.
+Tags such as `v0.1.3-beta`, mismatched versions, pull requests, other branches and mismatched checkout commits cannot publish. Existing drafts may resume only at their original tested tag/commit; a failed digest check leaves the draft unpublished. GitHub API permission/network errors fail explicitly instead of being treated as a missing release. An `untagged-…` URL is normal for an unpublished draft; it is not a reason to delete or move the version tag. The failed `v0.1.3` draft may remain; the new source uses `v0.1.13` because the existing version tag points to the previous tested commit.
 
-Expected assets for `v0.1.12`:
+Expected assets for `v0.1.13`:
 
 ```text
-auralis-0.1.12-windows-x64.zip
-auralis-0.1.12-windows-x64-setup.exe
-auralis-0.1.12-source.zip
+auralis-0.1.13-windows-x64.zip
+auralis-0.1.13-windows-x64-setup.exe
+auralis-0.1.13-source.zip
 SHA256SUMS.txt
 ```
 
@@ -96,4 +96,4 @@ These new entries first fill on a run using the updated workflow. Cache transfer
 
 If Settings shows Installed: 0.1.3, Download ready / SHA-256 verified, followed by Could not start the update, close Auralis and run the installer manually once. The latest public release checked for this repair is [v0.1.5](https://github.com/SiamTest/Auralis/releases/tag/v0.1.5), including embedded covers and Library sorting. [Its Windows installer](https://github.com/SiamTest/Auralis/releases/download/v0.1.5/auralis-0.1.5-windows-x64-setup.exe) has GitHub SHA-256 `28f6f2d13cd11a407d0c45fad5b00d4fd1ab99880874d40000901387b022338e`; the already downloaded copy was independently hashed and matches. No installer was executed here. Downloaded installers live under `%APPDATA%/Auralis/Auralis/updates/release-*/`. Installing to the same application directory preserves settings/session data; do not delete the application-data folder or sign out just to update. If previously using the portable ZIP, use the new installed shortcut afterward.
 
-The old application cannot acquire a source-code fix before it updates. v0.1.12 contains the handoff repair for future builds: finish the existing audio/TDLib/session-lock cleanup, then request a required engine exit. Windows' cancelable-exit acknowledgement can arrive before its asynchronous framework shutdown decision; comparing that acknowledgement with exit incorrectly killed the waiting installer helper. Cleanup is shared with normal window close and runs once. If cleanup fails, the process remains and the helper is stopped; the updater distinguishes cleanup failure, helper launch failure and installer-integrity failure with actionable recovery messages. The helper still waits for process termination and rehashes the installer before execution. SHA-256 checking does not replace code signing; installation and end-to-end update/restart remain unverified here.
+The old application cannot acquire a source-code fix before it updates. v0.1.13 contains the handoff repair for future builds: finish the existing audio/TDLib/session-lock cleanup, then request a required engine exit. Windows' cancelable-exit acknowledgement can arrive before its asynchronous framework shutdown decision; comparing that acknowledgement with exit incorrectly killed the waiting installer helper. Cleanup is shared with normal window close and runs once. If cleanup fails, the process remains and the helper is stopped; the updater distinguishes cleanup failure, helper launch failure and installer-integrity failure with actionable recovery messages. The helper still waits for process termination and rehashes the installer before execution. SHA-256 checking does not replace code signing; installation and end-to-end update/restart remain unverified here.
