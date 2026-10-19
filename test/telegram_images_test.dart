@@ -1,17 +1,49 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:auralis/models.dart';
 import 'package:auralis/telegram/td_transport.dart';
 import 'package:auralis/telegram/telegram_service.dart';
 
 import 'fakes.dart';
+import 'fixtures/cover_data.dart';
 
 void main() {
   late Directory dir;
   late FakeTd td;
   late TelegramService service;
   late File photo;
+  final png = File('test/fixtures/cover.png').readAsBytesSync();
+  final audio = id3(png);
+  Track song(int id, {int? thumbnail}) => Track(
+    id: '1:$id',
+    title: 'Song',
+    artist: 'Artist',
+    source: 'Channel',
+    fileId: id,
+    coverFileId: thumbnail,
+    size: audio.length,
+  );
+  void cachedAudio() {
+    final fallback = td.onRequest!;
+    td.onRequest = (r) async {
+      if (r['@type'] == 'getFileDownloadedPrefixSize') {
+        return {'size': audio.length - (r['offset'] as int)};
+      }
+      if (r['@type'] == 'readFilePart') {
+        final offset = r['offset'] as int;
+        return {
+          'data': base64Encode(
+            audio.sublist(offset, offset + (r['count'] as int)),
+          ),
+        };
+      }
+      return fallback(r);
+    };
+  }
+
   setUp(() async {
     dir = await Directory.systemTemp.createTemp('auralis-photos-');
     photo = await File('assets/branding/auralis.png')
@@ -134,6 +166,120 @@ void main() {
     });
     expect(await request, isNull);
     expect(await service.image(2), isNull);
+  });
+
+  test('embedded cover downloads only bounded metadata ranges', () async {
+    final ranges = <int, int>{};
+    td.onRequest = (r) async {
+      final offset = r['offset'] as int? ?? 0;
+      if (r['@type'] == 'getFileDownloadedPrefixSize') {
+        return {'size': ranges[offset] ?? 0};
+      }
+      if (r['@type'] == 'downloadFile') {
+        expect(r['priority'], 1);
+        ranges[offset] = r['limit'] as int;
+        return {};
+      }
+      if (r['@type'] == 'readFilePart') {
+        return {
+          'data': base64Encode(
+            audio.sublist(offset, offset + (r['count'] as int)),
+          ),
+        };
+      }
+      return null;
+    };
+    final first = service.cover(song(1));
+    expect(identical(first, service.cover(song(1))), isTrue);
+    expect(await first, png);
+    expect(ranges.values.fold(0, (a, b) => a + b), lessThan(audio.length));
+    expect(ranges.keys, [0, 10]);
+  });
+
+  test(
+    'embedded cover uses a playing file cache without moving its download',
+    () async {
+      service.isStreaming = (_) => true;
+      cachedAudio();
+      expect(await service.cover(song(1)), png);
+      expect(td.requests.where((r) => r['@type'] == 'downloadFile'), isEmpty);
+    },
+  );
+
+  test(
+    'missing stream bytes retry on file progress without resetting playback',
+    () async {
+      service.isStreaming = (_) => true;
+      td.onRequest = (r) async =>
+          r['@type'] == 'getFileDownloadedPrefixSize' ? {'size': 0} : null;
+      expect(await service.cover(song(1)), isNull);
+      cachedAudio();
+      td.events.add({
+        '@type': 'updateFile',
+        'file': {'id': 1},
+      });
+      expect(await service.cover(song(1)), png);
+      expect(td.requests.where((r) => r['@type'] == 'downloadFile'), isEmpty);
+    },
+  );
+
+  test('failed Telegram thumbnail falls back to embedded cover', () async {
+    td.onRequest = (r) async => throw TimeoutException('thumbnail unavailable');
+    cachedAudio();
+    expect(await service.cover(song(1, thumbnail: 90)), png);
+  });
+
+  test('sign-out discards pending embedded artwork', () async {
+    final prefix = Completer<Json>();
+    td.onRequest = (r) async =>
+        r['@type'] == 'getFileDownloadedPrefixSize' ? prefix.future : null;
+    final request = service.cover(song(1));
+    td.auth('authorizationStateLoggingOut');
+    prefix.complete({'size': audio.length});
+    expect(await request, isNull);
+    expect(td.requests.where((r) => r['@type'] == 'readFilePart'), isEmpty);
+  });
+
+  test('at most two metadata jobs run and a busy cover can retry', () async {
+    service.isStreaming = (_) => true;
+    final pending = <int, Completer<Json>>{};
+    td.onRequest = (r) async {
+      if (r['@type'] == 'getFileDownloadedPrefixSize') {
+        return (pending[r['file_id'] as int] = Completer<Json>()).future;
+      }
+      return null;
+    };
+    final first = service.cover(song(1));
+    final second = service.cover(song(2));
+    expect(await service.cover(song(3)), isNull);
+    expect(pending.keys, [1, 2]);
+    pending[1]!.complete({'size': 0});
+    pending[2]!.complete({'size': 0});
+    await Future.wait([first, second]);
+    final retry = service.cover(song(3));
+    expect(pending.keys, [1, 2, 3]);
+    pending[3]!.complete({'size': 0});
+    expect(await retry, isNull);
+  });
+
+  test('supplied thumbnail still works when audio size is unknown', () async {
+    expect(
+      await service.cover(
+        const Track(
+          id: 'unknown',
+          title: 'Song',
+          artist: 'Artist',
+          source: 'Channel',
+          fileId: 1,
+          coverFileId: 90,
+        ),
+      ),
+      await photo.readAsBytes(),
+    );
+    expect(
+      td.requests.where((r) => r['@type'] == 'getFileDownloadedPrefixSize'),
+      isEmpty,
+    );
   });
 
   test(
