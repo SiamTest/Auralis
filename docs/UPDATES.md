@@ -1,30 +1,30 @@
 # GitHub Releases and application updates
 
-Configured repository: **[SiamTest/Auralis](https://github.com/SiamTest/Auralis)**. [Run 39264104723](https://github.com/SiamTest/Auralis/actions/runs/39264104723) passed the app build, native smoke tests and installer packaging for `v0.1.3`, and reused/saved the TDLib cache without compiling it. Publishing created/uploaded to a draft, then failed with HTTP 404 because its digest check used the published-only by-tag endpoint. This revision adds embedded-cover extraction and saved Library sorting, retains the repair for draft lookup using its numeric release ID and targets `v0.1.5`, preserving the already-created `v0.1.3` tag. The current connection has **READ** permission, so this task has not pushed or published the change. Commit this revision to run the updated workflow; rerunning an old commit does not apply it.
+Configured repository: **[SiamTest/Auralis](https://github.com/SiamTest/Auralis)**. [Run 39264104723](https://github.com/SiamTest/Auralis/actions/runs/39264104723) passed the app build, native smoke tests and installer packaging for `v0.1.3`, and reused/saved the TDLib cache without compiling it. Publishing created/uploaded to a draft, then failed with HTTP 404 because its digest check used the published-only by-tag endpoint. This revision repairs the Windows update-exit handoff, expands build caching, includes embedded-cover extraction and saved Library sorting, and retains the repair for draft lookup using its numeric release ID and targets `v0.1.7`, preserving the already-created `v0.1.3` tag. The current connection has **READ** permission, so this task has not pushed or published the change. Commit this revision to run the updated workflow; rerunning an old commit does not apply it.
 
 ## Release flow
 
 1. Upload the complete project as the repository root, including `.github`, `pubspec.lock`, tests, native notices and the vendored runtime. A push to `main` runs the Windows build/test/package job and, after success, the stable publisher. A manual run on `main` does the same. Other branches and pull requests produce artifacts only.
 2. Analysis, automated tests, native smoke tests and installer packaging must succeed. The job packages a portable ZIP, per-user Inno Setup installer, application source ZIP from the committed revision, and `SHA256SUMS.txt`.
-3. The publisher reads the stable version from `pubspec.yaml`. For the current `0.1.5+6`, it creates `v0.1.5` at the exact tested commit if that tag is absent. No manual tag is required. An existing tag must already resolve to the tested commit; it is never moved. Explicit stable tag builds remain supported and must match `pubspec.yaml`.
+3. The publisher reads the stable version from `pubspec.yaml`. For the current `0.1.7+8`, it creates `v0.1.7` at the exact tested commit if that tag is absent. No manual tag is required. An existing tag must already resolve to the tested commit; it is never moved. Explicit stable tag builds remain supported and must match `pubspec.yaml`.
 4. Using the publishing job's `GITHUB_TOKEN` with `contents: write`, it creates an unpublished draft with `--prerelease=false`. It resolves the draft-aware CLI lookup's numeric `databaseId`, checks that the corresponding REST release has the intended tag and remains a non-prerelease draft, then uploads all four assets. It refreshes metadata by numeric ID, verifies GitHub's SHA-256 asset digests, then publishes with `--draft=false --prerelease=false`. It never uses the published-only by-tag REST route to verify a draft. The newest stable version is marked Latest; releasing an older version preserves a newer Latest. Build permissions remain read-only, and publishing jobs serialize to avoid concurrent tag/asset updates.
-5. Published versions are immutable. A later push with the same version reports that it is already stable and skips release mutation. For the next app update, bump `pubspec.yaml` to a new stable version, such as `0.1.6+7`, and commit to `main`; it automatically publishes `v0.1.6` after successful checks. A build-number-only change does not create a new stable release. An existing published prerelease is not silently overwritten; use a new stable version.
+5. Published versions are immutable. A later push with the same version reports that it is already stable and skips release mutation. For the next app update, bump `pubspec.yaml` to a new stable version, such as `0.1.8+9`, and commit to `main`; it automatically publishes `v0.1.8` after successful checks. A build-number-only change does not create a new stable release. An existing published prerelease is not silently overwritten; use a new stable version.
 
 Optional tag-based release after completing the native distribution audit:
 
 ```powershell
-git tag v0.1.5
-git push origin v0.1.5
+git tag v0.1.7
+git push origin v0.1.7
 ```
 
-Tags such as `v0.1.3-beta`, mismatched versions, pull requests, other branches and mismatched checkout commits cannot publish. Existing drafts may resume only at their original tested tag/commit; a failed digest check leaves the draft unpublished. GitHub API permission/network errors fail explicitly instead of being treated as a missing release. An `untagged-…` URL is normal for an unpublished draft; it is not a reason to delete or move the version tag. The failed `v0.1.3` draft may remain; the new source uses `v0.1.5` because the existing version tag points to the previous tested commit.
+Tags such as `v0.1.3-beta`, mismatched versions, pull requests, other branches and mismatched checkout commits cannot publish. Existing drafts may resume only at their original tested tag/commit; a failed digest check leaves the draft unpublished. GitHub API permission/network errors fail explicitly instead of being treated as a missing release. An `untagged-…` URL is normal for an unpublished draft; it is not a reason to delete or move the version tag. The failed `v0.1.3` draft may remain; the new source uses `v0.1.7` because the existing version tag points to the previous tested commit.
 
-Expected assets for `v0.1.5`:
+Expected assets for `v0.1.7`:
 
 ```text
-auralis-0.1.5-windows-x64.zip
-auralis-0.1.5-windows-x64-setup.exe
-auralis-0.1.5-source.zip
+auralis-0.1.7-windows-x64.zip
+auralis-0.1.7-windows-x64-setup.exe
+auralis-0.1.7-source.zip
 SHA256SUMS.txt
 ```
 
@@ -68,3 +68,32 @@ The default update source is `SiamTest/Auralis`. CI explicitly builds with `--da
 The original native playback corresponding-source/security audit remains outstanding. **Resolve native source/licenses and codec updates before public binary distribution.** This revision publishes automatically from successful `main` builds as requested; technical checks and a stable-release flag do not substitute for that audit. The application source ZIP contains this project, not complete corresponding source for every prebuilt native playback dependency. See `THIRD_PARTY_NOTICES.md`.
 
 Primary documentation: [GitHub release API](https://docs.github.com/en/rest/releases/releases), [GitHub CLI release creation](https://cli.github.com/manual/gh_release_create), [Inno Setup command-line parameters](https://jrsoftware.org/ishelp/topic_setupcmdline.htm).
+
+
+## Additional build caches
+
+The workflow reuses these public build inputs and intermediates:
+
+| Cache | Reused work and compatibility |
+| --- | --- |
+| Flutter SDK | Existing action cache, pinned Flutter version/architecture/revision; cache restore/extraction still takes time. |
+| Pub packages | Existing action cache, explicitly enabled; its key includes the lockfile. `pub get --enforce-lockfile` still checks the graph and integrity. |
+| Compiled TDLib | Existing stable v2 native-builder/image key and audited legacy migration, unchanged. A matching DLL cache skips source compilation. |
+| vcpkg binaries/downloads | New conditional fallback when TDLib must compile. Persists downloaded source/tools and compiled OpenSSL/zlib/gperf packages; vcpkg checks package ABIs before reuse. The primary key includes the native builder hash and runner image; fallback is restricted to the same Windows image/architecture. |
+| Windows build intermediates | New cache for CMake/MSVC output, libmpv archive/extraction and Flutter Windows build output; excludes the final runner Release directory. Reconfiguration and the release build always run. |
+| Dart/native hook intermediates | New cache for `.dart_tool/flutter_build`, `hooks_runner`, `native_assets` and Windows native-asset build output; reused with the Windows intermediates. Package configuration and generated plugin symlinks are recreated. |
+
+The Windows/Dart compatibility prefix includes runner image, exact Flutter SDK key, lockfile, Windows native source/configuration and vendored media_kit. The primary key adds application source/assets/pubspec hashes. UI/version edits can restore the previous compatible build while receiving a new entry; native input or dependency changes use a new compatibility prefix. Workflow-only edits do not invalidate these caches or the stable TDLib cache. Compiler/Flutter input checks remain responsible for deciding which intermediate outputs can be reused. The build target and original-quality playback behavior are unchanged.
+
+vcpkg cache directories are created as absolute paths before the native builder runs. Its download cache uses VCPKG_DOWNLOADS and its binary cache uses VCPKG_DEFAULT_BINARY_CACHE, following [Microsoft's environment configuration](https://learn.microsoft.com/en-us/vcpkg/users/config-environment) and [binary-cache ABI behavior](https://learn.microsoft.com/en-us/vcpkg/users/binarycaching). Both are ignored by Git. The builder script itself is untouched, preserving existing TDLib hits. The dependency cache saves non-cancelled partial progress even if TDLib fails; Windows intermediates are saved immediately after a successful Windows build, before smoke tests/packaging. [Restore/save actions](https://github.com/actions/cache/blob/0057852bfaa89a56745cba8c7296529d2fc39830/restore/README.md) use identical paths and primary keys.
+
+No cache hit skips analysis, tests, the Windows build, native smoke tests, packaging or release digest verification. Final installers, dist output, Telegram sessions/credentials, generated plugin links and package configuration are outside these new caches. Inno Setup continues to use the runner's installed copy when present. Raw TDLib object/build trees are intentionally excluded: they can be much larger than its final DLL/dependency cache and increase upload/eviction pressure.
+
+These new entries first fill on a run using the updated workflow. Cache transfer, Flutter startup, dependency checks, changed-code compilation and tests still take time. GitHub can evict or scope caches by branch/availability; misses rebuild normally. More caching does not guarantee a shorter run, and cross-run reuse/timings have not been measured for this revision. See [GitHub cache matching, access and eviction rules](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching).
+
+
+## Recovery from the v0.1.3 updater failure
+
+If Settings shows Installed: 0.1.3, Download ready / SHA-256 verified, followed by Could not start the update, close Auralis and run the installer manually once. The latest public release checked for this repair is [v0.1.5](https://github.com/SiamTest/Auralis/releases/tag/v0.1.5), including embedded covers and Library sorting. [Its Windows installer](https://github.com/SiamTest/Auralis/releases/download/v0.1.5/auralis-0.1.5-windows-x64-setup.exe) has GitHub SHA-256 `28f6f2d13cd11a407d0c45fad5b00d4fd1ab99880874d40000901387b022338e`; the already downloaded copy was independently hashed and matches. No installer was executed here. Downloaded installers live under `%APPDATA%/Auralis/Auralis/updates/release-*/`. Installing to the same application directory preserves settings/session data; do not delete the application-data folder or sign out just to update. If previously using the portable ZIP, use the new installed shortcut afterward.
+
+The old application cannot acquire a source-code fix before it updates. v0.1.7 contains the handoff repair for future builds: finish the existing audio/TDLib/session-lock cleanup, then request a required engine exit. Windows' cancelable-exit acknowledgement can arrive before its asynchronous framework shutdown decision; comparing that acknowledgement with exit incorrectly killed the waiting installer helper. Cleanup is shared with normal window close and runs once. If cleanup fails, the process remains and the helper is stopped; the updater distinguishes cleanup failure, helper launch failure and installer-integrity failure with actionable recovery messages. The helper still waits for process termination and rehashes the installer before execution. SHA-256 checking does not replace code signing; installation and end-to-end update/restart remain unverified here.
