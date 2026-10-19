@@ -43,7 +43,7 @@ Future<void> main() async {
     await audio.volume(settings.volume);
     final player = PlayerController(
       audio,
-      TelegramStreamProxy(telegram.transport.request),
+      TelegramStreamProxy(telegram.request),
       settings,
     );
     final package = await PackageInfo.fromPlatform();
