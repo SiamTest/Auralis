@@ -17,25 +17,16 @@ class Track {
     required this.title,
     required this.artist,
     required this.source,
-    this.path,
     this.fileId,
+    this.coverFileId,
     this.size = 0,
     this.duration = Duration.zero,
     this.mime = 'application/octet-stream',
   });
   final String id, title, artist, source, mime;
-  final String? path;
-  final int? fileId;
+  final int? fileId, coverFileId;
   final int size;
   final Duration duration;
-
-  factory Track.local(String path) => Track(
-    id: path,
-    title: p.basenameWithoutExtension(path),
-    artist: 'Local file',
-    source: 'On this device',
-    path: path,
-  );
 
   static Track? fromMessage(Map<String, dynamic> message, String chatTitle) {
     final content = message['content'] as Map<String, dynamic>?;
@@ -52,6 +43,21 @@ class Track {
       return null;
     }
     final file = data[isAudio ? 'audio' : 'document'] as Map<String, dynamic>;
+    final covers =
+        <Map<String, dynamic>>[
+          if (isAudio && data['album_cover_thumbnail'] is Map<String, dynamic>)
+            data['album_cover_thumbnail'],
+          if (isAudio)
+            ...(data['external_album_covers'] as List? ?? [])
+                .whereType<Map<String, dynamic>>(),
+          if (!isAudio && data['thumbnail'] is Map<String, dynamic>)
+            data['thumbnail'],
+        ]..sort(
+          (a, b) => ((b['width'] as int? ?? 0) * (b['height'] as int? ?? 0))
+              .compareTo(
+                (a['width'] as int? ?? 0) * (a['height'] as int? ?? 0),
+              ),
+        );
     return Track(
       id: '${message['chat_id']}:${message['id']}',
       title: (data['title'] as String? ?? '').isNotEmpty
@@ -62,6 +68,7 @@ class Track {
           : chatTitle,
       source: chatTitle,
       fileId: file['id'] as int,
+      coverFileId: covers.isEmpty ? null : covers.first['file']?['id'] as int?,
       size: file['size'] as int? ?? 0,
       duration: Duration(seconds: data['duration'] as int? ?? 0),
       mime: data['mime_type'] as String? ?? 'application/octet-stream',
@@ -70,9 +77,21 @@ class Track {
 }
 
 class MusicChat {
-  const MusicChat(this.id, this.title);
+  const MusicChat(this.id, this.title, {this.photoFileId});
   final int id;
   final String title;
+  final int? photoFileId;
+
+  static MusicChat? fromChat(Map<String, dynamic> chat) {
+    final type = chat['type'] as Map<String, dynamic>?;
+    return type?['@type'] == 'chatTypeSupergroup' && type?['is_channel'] == true
+        ? MusicChat(
+            chat['id'] as int,
+            chat['title'] as String,
+            photoFileId: chat['photo']?['small']?['id'] as int?,
+          )
+        : null;
+  }
 }
 
 String clockText(Duration value) {
