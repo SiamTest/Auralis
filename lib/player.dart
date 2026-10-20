@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:audio_session/audio_session.dart';
 import 'package:media_kit/media_kit.dart' hide Track;
 
 import 'models.dart';
@@ -26,7 +27,7 @@ abstract class AudioBackend extends ChangeNotifier {
 }
 
 class MpvBackend extends AudioBackend {
-  MpvBackend() {
+  MpvBackend({this.session}) {
     MediaKit.ensureInitialized();
     _player = Player(
       configuration: const PlayerConfiguration(
@@ -65,9 +66,11 @@ class MpvBackend extends AudioBackend {
     ]);
   }
   late final Player _player;
+  final AudioSession? session;
   final List<StreamSubscription<dynamic>> _subscriptions = [];
   @override
   Future<void> open(String uri) async {
+    await _focus();
     error = null;
     position = Duration.zero;
     duration = Duration.zero;
@@ -75,7 +78,29 @@ class MpvBackend extends AudioBackend {
   }
 
   @override
-  Future<void> toggle() => _player.playOrPause();
+  Future<void> toggle() async {
+    try {
+      error = null;
+      if (_player.state.playing) {
+        await _player.pause();
+        await session?.setActive(false);
+      } else {
+        await _focus();
+        await _player.play();
+      }
+    } catch (_) {
+      error =
+          'Could not change playback. Check audio availability and try again.';
+      notifyListeners();
+    }
+  }
+
+  Future<void> _focus() async {
+    if (session != null && !await session!.setActive(true)) {
+      throw StateError('Audio focus is unavailable.');
+    }
+  }
+
   @override
   Future<void> seek(Duration value) async {
     await _player.seek(value);
@@ -86,12 +111,17 @@ class MpvBackend extends AudioBackend {
   @override
   Future<void> volume(double value) => _player.setVolume(value);
   @override
-  Future<void> stop() => _player.stop();
+  Future<void> stop() async {
+    await _player.stop();
+    await session?.setActive(false);
+  }
+
   @override
   Future<void> shutdown() async {
     for (final subscription in _subscriptions) {
       await subscription.cancel();
     }
+    await session?.setActive(false);
     await _player.dispose();
     dispose();
   }
