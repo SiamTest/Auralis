@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'models.dart';
 
@@ -16,15 +17,53 @@ class Lyrics {
     this.lines, {
     this.instrumental = false,
     this.online = false,
+    this.embedded = false,
+    this.imported = false,
   });
   final String plain;
   final List<LyricLine> lines;
-  final bool instrumental, online;
+  final bool instrumental, online, embedded, imported;
+
+  static const maxFileBytes = 256 * 1024;
+
+  static Lyrics fromFileBytes(Uint8List bytes) {
+    if (bytes.length > maxFileBytes) {
+      throw const FormatException('LRC files must be 256 KiB or smaller.');
+    }
+    String text;
+    if (bytes.length >= 2 &&
+        (bytes[0] == 255 && bytes[1] == 254 ||
+            bytes[0] == 254 && bytes[1] == 255)) {
+      if (bytes.length.isOdd) {
+        throw const FormatException('Invalid UTF-16 lyrics.');
+      }
+      final data = ByteData.sublistView(bytes);
+      final endian = bytes[0] == 255 ? Endian.little : Endian.big;
+      text = String.fromCharCodes([
+        for (var i = 2; i < bytes.length; i += 2) data.getUint16(i, endian),
+      ]);
+    } else {
+      text = utf8.decode(bytes);
+    }
+    final lyrics = parse(
+      text
+          .replaceFirst('\uFEFF', '')
+          .replaceAll('\r\n', '\n')
+          .replaceAll('\r', '\n'),
+      imported: true,
+    );
+    if (lyrics.plain.isEmpty && lyrics.lines.isEmpty) {
+      throw const FormatException('The selected file has no lyrics.');
+    }
+    return lyrics;
+  }
 
   static Lyrics parse(
     String text, {
     String? plain,
     bool online = false,
+    bool embedded = false,
+    bool imported = false,
     bool instrumental = false,
   }) {
     if (text.length > 256 * 1024 || (plain?.length ?? 0) > 256 * 1024) {
@@ -95,6 +134,8 @@ class Lyrics {
       (plain?.trim().isNotEmpty ?? false) ? plain!.trim() : fallback,
       grouped,
       online: online,
+      embedded: embedded,
+      imported: imported,
       instrumental: instrumental,
     );
   }
