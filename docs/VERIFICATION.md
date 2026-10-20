@@ -420,3 +420,23 @@ Now Playing now budgets queue previews first using a smaller cover/details allow
 Verification: the complete Flutter suite passed **117 tests**, with **23 Windows-only cases skipped**, and fatal-info static analysis is clean. The existing adaptive regression now asserts that medium desktop viewports expose a hit-testable first upcoming row fully inside the page; it includes 1000×700 and 1018×680 (matching the screenshot's approximate client size), alongside 360×480, 390×844, 520×560, 760×650, 900×480, 1280×800 and 1920×1080, plus 130% text. Existing no-Scrollable, drag-does-not-move-artwork, visible controls and Queue navigation assertions remain passing. Actual 1000×700, 360×480 and 1920×1080 synthetic widget screenshots were visually inspected. The 1000×700 frame shows all three upcoming rows; screenshots contain only original fixture artwork/metadata, not the user's music or desktop. Native desktop/device resizing and a compiled EXE/APK were not run for this change.
 
 Source/client/About metadata is 0.1.24+25 / 0.1.24. Complete source ZIP integrity, the new medium-window screenshot, both independent workflows and previous Gradle/updater/SDK fixes were checked. No release or executable was published locally.
+
+
+## Android single-ABI APK packaging correction (CI only)
+
+The Android build log confirmed successful Flutter/Gradle `assembleDebug` but failed
+`tool/verify-android.py` with `ValueError: Unexpected ABI in the APK.` The native
+libraries supplied by media dependencies can include additional ABIs even when
+Flutter compilation uses `--target-platform android-arm64` or `android-x64`.
+The workflow now adds Flutter's documented `--split-per-abi` and copies the
+actual `app-$ABI-$mode.apk` output before verification. This deliberately
+preserves strict checks against mixed ABIs, missing TDLib/libmpv/Flutter
+libraries, ELF 16 KiB load alignment, APK signing and zip alignment.
+
+Local checks: all **8 Python Android tooling tests passed** (two new regression
+tests for the workflow output and mixed-ABI native archive); Android source
+verification passed; workflow YAML and extracted Bash syntax parsed correctly.
+The build container does not have Flutter/Dart or an Android SDK, so an actual
+APK build, Flutter widget tests and Android device installation were not run
+locally. Re-run the Android GitHub Action to confirm an ABI-pure debug/release
+APK and its other post-build checks. The app code and app version are unchanged.
