@@ -95,6 +95,8 @@ class Track {
   }
 }
 
+enum PlaybackRepeat { off, all, one }
+
 enum LibrarySort {
   newest('Newest first'),
   oldest('Oldest first'),
