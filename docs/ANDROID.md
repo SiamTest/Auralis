@@ -58,3 +58,8 @@ python3 tool/verify-android.py build/app/outputs/flutter-apk/app-debug.apk arm64
 For a local release, create the ignored `android/key.properties` with `storeFile`, `storePassword`, `keyAlias` and `keyPassword`, using an absolute keystore path or a path relative to `android/`. Then build with `--release`. Keep the same application ID and signing key across upgrades, and increment `pubspec.yaml` for each app update.
 
 To test on a connected x86_64 emulator, build TDLib for x86_64 and use `--target-platform android-x64`. The native Android Keystore test can then run with `cd android && ./gradlew connectedDebugAndroidTest -Ptarget-platform=android-x64`. This is an actual device/emulator test; host bridge tests alone do not verify Android cryptography or hardware playback. See VERIFICATION.md for what was run for this delivery and THIRD_PARTY_NOTICES.md for native distribution limits.
+
+
+### CI SDK command-line setup
+
+The Android workflow explicitly runs the commit-pinned android-actions/setup-android action after Java setup and before invoking sdkmanager. This provisions the command-line tools, accepts SDK licenses and adds sdkmanager to PATH; the following step installs the pinned Android 36/build tools/NDK packages. The apt-get output in the reported failure was successful; exit 127 came from the missing sdkmanager command. This is a CI-only correction; the source version stays 0.1.21+22. Commit the complete corrected source and run the Android APK build workflow on that commit; rerunning the previous commit uses its old workflow.
