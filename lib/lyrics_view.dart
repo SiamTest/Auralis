@@ -6,14 +6,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
 import 'lyrics.dart';
+import 'data_files.dart';
 import 'models.dart';
 import 'player.dart';
 import 'wave_seek_bar.dart';
 
-const lyricsBackground = Color(0xFF004E64);
-const lyricsHighlight = Color(0xFF68D3F5);
-const _lyricsSurface = Color(0xFF0D0E17);
-const _lyricsPlay = Color(0xFFC5BEFF);
+const lyricsBackground = Color(0xFF111015);
+const lyricsHighlight = Color(0xFFC7B5FF);
+const _lyricsSurface = Color(0xFF19171E);
+const _lyricsPlay = Color(0xFFC7B5FF);
 
 class LyricsView extends StatefulWidget {
   const LyricsView({
@@ -22,11 +23,15 @@ class LyricsView extends StatefulWidget {
     required this.repository,
     required this.artwork,
     required this.onBack,
+    this.loadEmbedded,
+    this.files = const DataFiles(),
   });
+  final DataFiles files;
   final PlayerController player;
   final LyricsRepository repository;
   final Widget artwork;
   final VoidCallback onBack;
+  final Future<Lyrics?> Function(Track)? loadEmbedded;
   @override
   State<LyricsView> createState() => _LyricsViewState();
 }
@@ -35,6 +40,7 @@ class _LyricsViewState extends State<LyricsView> {
   Track? _track;
   Lyrics? _lyrics;
   String? _error;
+  bool _importing = false;
   bool _loading = false, _synced = true, _looked = false;
   int _generation = 0;
 
@@ -58,6 +64,32 @@ class _LyricsViewState extends State<LyricsView> {
     _loading = false;
     _error = null;
     _synced = _lyrics == null || _lyrics!.lines.isNotEmpty;
+    if (_lyrics == null && widget.loadEmbedded != null) unawaited(_embedded());
+  }
+
+  Future<void> _embedded() async {
+    final track = _track, load = widget.loadEmbedded;
+    if (track == null || load == null || _loading) return;
+    final generation = ++_generation;
+    _loading = true;
+    try {
+      final lyrics = await load(track);
+      if (!mounted || generation != _generation) return;
+      setState(() {
+        if (lyrics != null) {
+          _lyrics = lyrics;
+          widget.repository.save(track, lyrics);
+          _synced = lyrics.lines.isNotEmpty;
+          _error = null;
+        }
+      });
+    } catch (_) {
+      // Missing or unavailable tags leave lookup and paste available.
+    } finally {
+      if (mounted && generation == _generation) {
+        setState(() => _loading = false);
+      }
+    }
   }
 
   Future<void> _find() async {
@@ -88,6 +120,38 @@ class _LyricsViewState extends State<LyricsView> {
           _loading = false;
         });
       }
+    }
+  }
+
+  Future<void> _import() async {
+    final track = _track;
+    if (track == null || _importing) return;
+    final generation = _generation;
+    setState(() => _importing = true);
+    try {
+      final path = await widget.files.openLyrics();
+      if (path == null || !mounted || generation != _generation) return;
+      final bytes = await widget.files.readBytes(
+        path,
+        maxBytes: Lyrics.maxFileBytes,
+      );
+      final lyrics = Lyrics.fromFileBytes(bytes);
+      if (!mounted || generation != _generation || !identical(track, _track)) {
+        return;
+      }
+      _useLyrics(track, lyrics);
+    } catch (_) {
+      if (mounted && generation == _generation) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Could not import lyrics. Choose a UTF-8 or UTF-16 .lrc file up to 256 KiB with at most 2000 lines.',
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _importing = false);
     }
   }
 
@@ -153,6 +217,10 @@ class _LyricsViewState extends State<LyricsView> {
       },
     );
     if (!mounted || !identical(track, _track) || lyrics == null) return;
+    _useLyrics(track, lyrics);
+  }
+
+  void _useLyrics(Track track, Lyrics lyrics) {
     _generation++;
     widget.repository.save(track, lyrics);
     setState(() {
@@ -179,9 +247,26 @@ class _LyricsViewState extends State<LyricsView> {
     tooltip: 'Lyrics options',
     icon: Icon(vertical ? Icons.more_vert_rounded : Icons.more_horiz_rounded),
     onSelected: (value) {
-      unawaited(value == 'paste' ? _paste() : _find());
+      if (value == 'import') {
+        unawaited(_import());
+      } else if (value == 'embedded') {
+        setState(() => unawaited(_embedded()));
+      } else {
+        unawaited(value == 'paste' ? _paste() : _find());
+      }
     },
     itemBuilder: (_) => [
+      PopupMenuItem(
+        value: 'import',
+        enabled: _track != null && !_importing,
+        child: const Text('Import .lrc file'),
+      ),
+      if (widget.loadEmbedded != null)
+        PopupMenuItem(
+          value: 'embedded',
+          enabled: _track != null && !_loading,
+          child: const Text('Read lyrics from music file'),
+        ),
       PopupMenuItem(
         value: 'find',
         enabled: _track != null && !_loading,
@@ -230,7 +315,7 @@ class _LyricsViewState extends State<LyricsView> {
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 480),
                 child: const Text(
-                  'Find lyrics sends this song’s title, artist and duration to LRCLIB. Your Telegram account and channel details stay private.',
+                  'Embedded lyrics are read from the music file first. Find lyrics sends this song’s title, artist and duration to LRCLIB. Your Telegram account and channel details stay private.',
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -239,6 +324,11 @@ class _LyricsViewState extends State<LyricsView> {
                 onPressed: _find,
                 icon: const Icon(Icons.search),
                 label: const Text('Find lyrics'),
+              ),
+              TextButton.icon(
+                onPressed: _importing ? null : _import,
+                icon: const Icon(Icons.file_open_outlined, size: 18),
+                label: const Text('Import .lrc file'),
               ),
               TextButton(
                 onPressed: _paste,
@@ -283,7 +373,7 @@ class _LyricsViewState extends State<LyricsView> {
           style: TextButton.styleFrom(
             backgroundColor: selected ? lyricsHighlight : _lyricsSurface,
             foregroundColor: selected
-                ? const Color(0xFF003447)
+                ? const Color(0xFF21182F)
                 : const Color(0xFFE4E0EF),
             disabledBackgroundColor: _lyricsSurface,
             disabledForegroundColor: const Color(0xFF6C6A76),
@@ -324,7 +414,7 @@ class _LyricsViewState extends State<LyricsView> {
             style:
                 IconButton.styleFrom(
                   backgroundColor: _lyricsPlay,
-                  foregroundColor: const Color(0xFF16174D),
+                  foregroundColor: const Color(0xFF21182F),
                   disabledBackgroundColor: _lyricsPlay.withValues(alpha: .35),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(
@@ -428,7 +518,7 @@ class _LyricsViewState extends State<LyricsView> {
       data: theme.copyWith(
         colorScheme: theme.colorScheme.copyWith(
           primary: lyricsHighlight,
-          onPrimary: const Color(0xFF003447),
+          onPrimary: const Color(0xFF21182F),
           surface: _lyricsSurface,
           onSurface: const Color(0xFFE4E0EF),
         ),
@@ -542,11 +632,15 @@ class _LyricsViewState extends State<LyricsView> {
                     child: Text(
                       lyrics.online
                           ? 'Lyrics: LRCLIB · timings may vary by recording'
+                          : lyrics.embedded
+                          ? 'Lyrics from music file'
+                          : lyrics.imported
+                          ? 'Imported LRC · session only'
                           : 'Pasted lyrics · session only',
                       textAlign: TextAlign.center,
                       style: const TextStyle(
                         fontSize: 10,
-                        color: Color(0xFFA0BBC4),
+                        color: Color(0xFFAAA4B5),
                       ),
                     ),
                   ),
