@@ -349,7 +349,7 @@ class TelegramService extends ChangeNotifier {
           'system_language_code': 'en',
           'device_model': 'Auralis Windows x64',
           'system_version': 'Windows',
-          'application_version': '0.1.13',
+          'application_version': '0.1.16',
         });
       } catch (_) {
         _parametersSent = false;
