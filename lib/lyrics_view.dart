@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -7,6 +8,12 @@ import 'package:flutter/rendering.dart';
 import 'lyrics.dart';
 import 'models.dart';
 import 'player.dart';
+import 'wave_seek_bar.dart';
+
+const lyricsBackground = Color(0xFF004E64);
+const lyricsHighlight = Color(0xFF68D3F5);
+const _lyricsSurface = Color(0xFF0D0E17);
+const _lyricsPlay = Color(0xFFC5BEFF);
 
 class LyricsView extends StatefulWidget {
   const LyricsView({
@@ -168,173 +175,385 @@ class _LyricsViewState extends State<LyricsView> {
     ),
   );
 
+  Widget _options({bool vertical = false}) => PopupMenuButton<String>(
+    tooltip: 'Lyrics options',
+    icon: Icon(vertical ? Icons.more_vert_rounded : Icons.more_horiz_rounded),
+    onSelected: (value) {
+      unawaited(value == 'paste' ? _paste() : _find());
+    },
+    itemBuilder: (_) => [
+      PopupMenuItem(
+        value: 'find',
+        enabled: _track != null && !_loading,
+        child: const Text('Find lyrics on LRCLIB'),
+      ),
+      PopupMenuItem(
+        value: 'paste',
+        enabled: _track != null,
+        child: const Text('Paste lyrics'),
+      ),
+    ],
+  );
+
+  Widget _body() {
+    final lyrics = _lyrics;
+    if (_track == null) return _message('Choose a track to see its lyrics.');
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_error != null) return _message(_error!);
+    if (lyrics?.instrumental == true) {
+      return _message('Instrumental · no lyrics');
+    }
+    if (lyrics == null) {
+      return Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.lyrics_rounded,
+                size: 44,
+                color: lyricsHighlight,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                _looked
+                    ? 'No lyrics found for this song.'
+                    : 'Bring the words into focus.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 12),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 480),
+                child: const Text(
+                  'Find lyrics sends this song’s title, artist and duration to LRCLIB. Your Telegram account and channel details stay private.',
+                  textAlign: TextAlign.center,
+                ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: _find,
+                icon: const Icon(Icons.search),
+                label: const Text('Find lyrics'),
+              ),
+              TextButton(
+                onPressed: _paste,
+                child: const Text('Paste lyrics instead'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    if (_synced && lyrics.lines.isNotEmpty) {
+      return _SyncedLyrics(
+        key: ObjectKey(lyrics),
+        lyrics: lyrics,
+        player: widget.player,
+      );
+    }
+    return SingleChildScrollView(
+      key: ObjectKey(lyrics),
+      padding: const EdgeInsets.all(24),
+      child: Align(
+        alignment: Alignment.topLeft,
+        child: SelectableText(
+          lyrics.plain,
+          style: const TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.w600,
+            height: 1.7,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _mode(bool synced) {
+    final selected = _synced == synced;
+    return Expanded(
+      child: Semantics(
+        selected: selected,
+        child: TextButton(
+          key: ValueKey(synced ? 'lyrics-synced-mode' : 'lyrics-static-mode'),
+          style: TextButton.styleFrom(
+            backgroundColor: selected ? lyricsHighlight : _lyricsSurface,
+            foregroundColor: selected
+                ? const Color(0xFF003447)
+                : const Color(0xFFE4E0EF),
+            disabledBackgroundColor: _lyricsSurface,
+            disabledForegroundColor: const Color(0xFF6C6A76),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(selected ? 40 : 12),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 16),
+            textStyle: Theme.of(context).textTheme.labelLarge
+                ?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          onPressed: synced && _lyrics!.lines.isEmpty
+              ? null
+              : () => setState(() => _synced = synced),
+          child: Text(synced ? 'Synced' : 'Static'),
+        ),
+      ),
+    );
+  }
+
+  Widget _playback(bool short, bool reduced) {
+    final player = widget.player, audio = player.audio;
+    final duration = audio.duration.inMilliseconds;
+    final progress = duration <= 0
+        ? 0.0
+        : (audio.position.inMilliseconds / duration).clamp(0.0, 1.0);
+    final buffered = duration <= 0
+        ? 0.0
+        : (audio.buffered.inMilliseconds / duration).clamp(0.0, 1.0);
+    final size = short ? 48.0 : 72.0;
+    return Row(
+      children: [
+        SizedBox(
+          width: size,
+          height: size,
+          child: IconButton.filled(
+            key: const ValueKey('lyrics-play-pause'),
+            tooltip: audio.playing ? 'Pause' : 'Play',
+            style:
+                IconButton.styleFrom(
+                  backgroundColor: _lyricsPlay,
+                  foregroundColor: const Color(0xFF16174D),
+                  disabledBackgroundColor: _lyricsPlay.withValues(alpha: .35),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(
+                      audio.playing ? 20 : size / 2,
+                    ),
+                  ),
+                ).copyWith(
+                  animationDuration: Duration(milliseconds: reduced ? 0 : 220),
+                ),
+            onPressed: _track == null || player.loading
+                ? null
+                : () async {
+                    try {
+                      await audio.toggle();
+                    } catch (_) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Could not change playback.'),
+                          ),
+                        );
+                      }
+                    }
+                  },
+            icon: AnimatedSwitcher(
+              duration: Duration(milliseconds: reduced ? 0 : 180),
+              transitionBuilder: (child, animation) => ScaleTransition(
+                scale: animation,
+                child: FadeTransition(opacity: animation, child: child),
+              ),
+              child: player.loading || audio.buffering
+                  ? const SizedBox(
+                      key: ValueKey('lyrics-buffering'),
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Icon(
+                      audio.playing
+                          ? Icons.pause_rounded
+                          : Icons.play_arrow_rounded,
+                      key: ValueKey(audio.playing),
+                      size: short ? 28 : 36,
+                    ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: DecoratedBox(
+            key: const ValueKey('lyrics-seek-pill'),
+            decoration: BoxDecoration(
+              color: _lyricsSurface,
+              borderRadius: BorderRadius.circular(40),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: WaveSeekBar(
+                value: progress,
+                buffered: buffered,
+                playing: audio.playing && !audio.buffering && _track != null,
+                reducedMotion: reduced,
+                format: (value) => clockText(
+                  Duration(milliseconds: (value * duration).round()),
+                ),
+                onChanged: duration <= 0
+                    ? null
+                    : (value) async {
+                        try {
+                          await player.seek(
+                            Duration(milliseconds: (value * duration).round()),
+                          );
+                        } catch (_) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Could not seek to this position.',
+                                ),
+                              ),
+                            );
+                          }
+                        }
+                      },
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final track = _track, lyrics = _lyrics;
-    final accent = Theme.of(context).colorScheme.primary;
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [accent.withValues(alpha: .15), const Color(0xFF15121D)],
+    final reduced =
+        widget.player.settings.reducedMotion ||
+        MediaQuery.disableAnimationsOf(context);
+    final theme = Theme.of(context);
+    return Theme(
+      data: theme.copyWith(
+        colorScheme: theme.colorScheme.copyWith(
+          primary: lyricsHighlight,
+          onPrimary: const Color(0xFF003447),
+          surface: _lyricsSurface,
+          onSurface: const Color(0xFFE4E0EF),
         ),
-        borderRadius: BorderRadius.circular(24),
       ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(8),
-            child: Row(
+      child: Material(
+        key: const ValueKey('lyrics-immersive'),
+        color: lyricsBackground,
+        child: LayoutBuilder(
+          builder: (context, box) {
+            final short = box.maxHeight < 420;
+            return Column(
               children: [
-                IconButton(
-                  onPressed: widget.onBack,
-                  tooltip: 'Back to cover',
-                  icon: const Icon(Icons.arrow_back_rounded),
-                ),
-                SizedBox(width: 40, height: 40, child: widget.artwork),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        track?.title ?? 'Nothing playing',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      Text(
-                        track?.artist ?? 'Choose a track first',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                    ],
-                  ),
-                ),
-                PopupMenuButton<String>(
-                  tooltip: 'Lyrics options',
-                  onSelected: (value) {
-                    if (value == 'paste') {
-                      unawaited(_paste());
-                    } else {
-                      unawaited(_find());
-                    }
-                  },
-                  itemBuilder: (_) => [
-                    PopupMenuItem(
-                      value: 'find',
-                      enabled: track != null && !_loading,
-                      child: const Text('Find lyrics on LRCLIB'),
-                    ),
-                    PopupMenuItem(
-                      value: 'paste',
-                      enabled: track != null,
-                      child: const Text('Paste lyrics'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: track == null
-                ? _message('Choose a track to see its lyrics.')
-                : _loading
-                ? const Center(child: CircularProgressIndicator())
-                : _error != null
-                ? _message(_error!)
-                : lyrics?.instrumental == true
-                ? _message('Instrumental · no lyrics')
-                : lyrics == null
-                ? SingleChildScrollView(
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      children: [
-                        Icon(Icons.lyrics_rounded, size: 44, color: accent),
-                        const SizedBox(height: 12),
-                        Text(
-                          _looked
-                              ? 'No lyrics found for this song.'
-                              : 'Bring the words into focus.',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w600,
+                Padding(
+                  padding: EdgeInsets.fromLTRB(16, short ? 6 : 16, 16, 4),
+                  child: Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 420),
+                      child: Material(
+                        key: const ValueKey('lyrics-song-pill'),
+                        color: _lyricsSurface,
+                        borderRadius: BorderRadius.circular(48),
+                        child: Padding(
+                          padding: const EdgeInsets.all(6),
+                          child: Row(
+                            children: [
+                              ClipOval(
+                                child: SizedBox(
+                                  width: short ? 40 : 50,
+                                  height: short ? 40 : 50,
+                                  child: widget.artwork,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      track?.title ?? 'Nothing playing',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    Text(
+                                      track?.artist ?? 'Choose a track first',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        color: Color(0xFFAAA7B4),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              _options(),
+                            ],
                           ),
                         ),
-                        const SizedBox(height: 12),
-                        const Text(
-                          'Find lyrics sends this song’s title, artist and duration to LRCLIB. Your Telegram account and channel details stay private.',
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 16),
-                        FilledButton.icon(
-                          onPressed: _find,
-                          icon: const Icon(Icons.search),
-                          label: const Text('Find lyrics'),
-                        ),
-                        TextButton(
-                          onPressed: _paste,
-                          child: const Text('Paste lyrics instead'),
-                        ),
-                      ],
-                    ),
-                  )
-                : _synced && lyrics.lines.isNotEmpty
-                ? _SyncedLyrics(
-                    key: ObjectKey(lyrics),
-                    lyrics: lyrics,
-                    player: widget.player,
-                  )
-                : SingleChildScrollView(
-                    key: ObjectKey(lyrics),
-                    padding: const EdgeInsets.all(24),
-                    child: Align(
-                      alignment: Alignment.topLeft,
-                      child: SelectableText(
-                        lyrics.plain,
-                        style: const TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.w600,
-                          height: 1.7,
-                        ),
                       ),
                     ),
                   ),
-          ),
-          if (lyrics != null && !lyrics.instrumental)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-              child: Column(
-                children: [
-                  SegmentedButton<bool>(
-                    segments: [
-                      ButtonSegment(
-                        value: true,
-                        label: const Text('Synced'),
-                        enabled: lyrics.lines.isNotEmpty,
+                ),
+                Expanded(child: _body()),
+                Padding(
+                  padding: EdgeInsets.fromLTRB(16, 4, 16, short ? 6 : 14),
+                  child: _playback(short, reduced),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                  child: Row(
+                    children: [
+                      IconButton.filled(
+                        onPressed: widget.onBack,
+                        tooltip: 'Back to cover',
+                        style: IconButton.styleFrom(
+                          backgroundColor: _lyricsSurface,
+                          foregroundColor: const Color(0xFFE4E0EF),
+                        ),
+                        icon: const Icon(Icons.arrow_back_rounded),
                       ),
-                      const ButtonSegment(value: false, label: Text('Static')),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: lyrics != null && !lyrics.instrumental
+                            ? Row(
+                                children: [
+                                  _mode(true),
+                                  const SizedBox(width: 8),
+                                  _mode(false),
+                                ],
+                              )
+                            : const SizedBox.shrink(),
+                      ),
+                      const SizedBox(width: 8),
+                      Material(
+                        color: _lyricsSurface,
+                        shape: const CircleBorder(),
+                        child: _options(vertical: true),
+                      ),
                     ],
-                    selected: {_synced},
-                    onSelectionChanged: (value) => setState(() {
-                      _synced = value.single;
-                    }),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    lyrics.online
-                        ? 'Lyrics: LRCLIB · timings may vary by recording'
-                        : 'Pasted lyrics · session only',
-                    style: const TextStyle(fontSize: 10),
+                ),
+                if (lyrics != null && !short)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Text(
+                      lyrics.online
+                          ? 'Lyrics: LRCLIB · timings may vary by recording'
+                          : 'Pasted lyrics · session only',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 10,
+                        color: Color(0xFFA0BBC4),
+                      ),
+                    ),
                   ),
-                ],
-              ),
-            ),
-        ],
+              ],
+            );
+          },
+        ),
       ),
     );
   }
@@ -354,6 +573,8 @@ class _SyncedLyricsState extends State<_SyncedLyrics> {
   int? _lastActive;
   double? _width, _height;
   TextScaler? _scaler;
+  TextStyle? _style;
+  TextDirection? _direction;
   final _heights = <double>[], _offsets = <double>[];
   @override
   void dispose() {
@@ -366,20 +587,28 @@ class _SyncedLyricsState extends State<_SyncedLyrics> {
     builder: (context, box) {
       final active = widget.lyrics.activeAt(widget.player.audio.position);
       final scaler = MediaQuery.textScalerOf(context);
+      final reduced =
+          widget.player.settings.reducedMotion ||
+          MediaQuery.disableAnimationsOf(context);
+      final direction = Directionality.of(context);
       final style = TextStyle(
         fontSize: box.maxWidth < 500 ? 23 : 32,
-        height: 1.5,
+        height: 1.35,
         fontWeight: FontWeight.w700,
         fontFamily: Theme.of(context).textTheme.bodyLarge?.fontFamily,
       );
       final changed =
           _width != box.maxWidth ||
           _scaler != scaler ||
-          _height != box.maxHeight;
+          _height != box.maxHeight ||
+          _style != style ||
+          _direction != direction;
       if (changed) {
         _width = box.maxWidth;
         _height = box.maxHeight;
         _scaler = scaler;
+        _style = style;
+        _direction = direction;
         _heights.clear();
         _offsets.clear();
         var offset = 0.0;
@@ -389,7 +618,7 @@ class _SyncedLyricsState extends State<_SyncedLyrics> {
               text: line.text.isEmpty ? '♪' : line.text,
               style: style,
             ),
-            textDirection: Directionality.of(context),
+            textDirection: direction,
             textScaler: scaler,
           )..layout(maxWidth: math.max(1, box.maxWidth - 48));
           final height = math.max(76.0, painter.height + 44);
@@ -405,14 +634,13 @@ class _SyncedLyricsState extends State<_SyncedLyrics> {
           final target =
               (active < 0 ? 0.0 : _offsets[active] + _heights[active] / 2)
                   .clamp(0.0, _scroll.position.maxScrollExtent);
-          if (widget.player.settings.reducedMotion ||
-              MediaQuery.disableAnimationsOf(context)) {
+          if (reduced) {
             _scroll.jumpTo(target);
           } else {
             unawaited(
               _scroll.animateTo(
                 target,
-                duration: const Duration(milliseconds: 350),
+                duration: const Duration(milliseconds: 480),
                 curve: Curves.easeOutCubic,
               ),
             );
@@ -431,65 +659,100 @@ class _SyncedLyricsState extends State<_SyncedLyrics> {
               }
               return false;
             },
-            child: ListView.builder(
-              key: const ValueKey('synced-lyrics'),
-              controller: _scroll,
-              padding: EdgeInsets.symmetric(vertical: box.maxHeight * .5),
-              itemCount: widget.lyrics.lines.length,
-              itemExtentBuilder: (index, _) => _heights[index],
-              itemBuilder: (context, index) {
-                final line = widget.lyrics.lines[index];
-                final current = active == index;
-                final distance = (index - active).abs();
-                return Semantics(
-                  selected: current,
-                  button: true,
-                  label: 'Seek to ${clockText(line.time)}',
-                  child: InkWell(
-                    key: ValueKey('lyric-$index'),
-                    onTap: () async {
-                      try {
-                        final duration = widget.player.audio.duration;
-                        final target =
-                            duration > Duration.zero && line.time > duration
-                            ? duration
-                            : line.time;
-                        await widget.player.audio.seek(target);
-                        if (mounted) {
-                          setState(() {
-                            _follow = true;
-                            _lastActive = null;
-                          });
+            child: ShaderMask(
+              shaderCallback: (bounds) => const LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.transparent,
+                  Colors.white,
+                  Colors.white,
+                  Colors.transparent,
+                ],
+                stops: [0, .12, .86, 1],
+              ).createShader(bounds),
+              blendMode: BlendMode.dstIn,
+              child: ListView.builder(
+                key: const ValueKey('synced-lyrics'),
+                controller: _scroll,
+                padding: EdgeInsets.symmetric(vertical: box.maxHeight * .5),
+                itemCount: widget.lyrics.lines.length,
+                itemExtentBuilder: (index, _) => _heights[index],
+                itemBuilder: (context, index) {
+                  final line = widget.lyrics.lines[index];
+                  final current = active == index;
+                  final distance = (index - active).abs();
+                  return Semantics(
+                    selected: current,
+                    button: true,
+                    label: 'Seek to ${clockText(line.time)}',
+                    child: InkWell(
+                      key: ValueKey('lyric-$index'),
+                      onTap: () async {
+                        try {
+                          final duration = widget.player.audio.duration;
+                          final target =
+                              duration > Duration.zero && line.time > duration
+                              ? duration
+                              : line.time;
+                          await widget.player.seek(target);
+                          if (mounted) {
+                            setState(() {
+                              _follow = true;
+                              _lastActive = null;
+                            });
+                          }
+                        } catch (_) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Could not seek to this lyric.'),
+                              ),
+                            );
+                          }
                         }
-                      } catch (_) {
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Could not seek to this lyric.'),
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 22,
+                        ),
+                        child: TweenAnimationBuilder<double>(
+                          duration: Duration(milliseconds: reduced ? 0 : 360),
+                          curve: Curves.easeOutCubic,
+                          tween: Tween(
+                            end: current || !_follow
+                                ? 0.0
+                                : math.min(3.0, 1.5 + distance * .35),
+                          ),
+                          builder: (context, blur, child) => ImageFiltered(
+                            imageFilter: ui.ImageFilter.blur(
+                              sigmaX: blur,
+                              sigmaY: blur,
                             ),
-                          );
-                        }
-                      }
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 24,
-                        vertical: 22,
-                      ),
-                      child: Text(
-                        line.text.isEmpty ? '♪' : line.text,
-                        style: style.copyWith(
-                          color: current
-                              ? Theme.of(context).colorScheme.primary
-                              : Colors.white.withValues(
-                                  alpha: distance <= 1 ? .48 : .23,
-                                ),
+                            enabled: blur > .01,
+                            child: child,
+                          ),
+                          child: AnimatedDefaultTextStyle(
+                            duration: Duration(milliseconds: reduced ? 0 : 360),
+                            curve: Curves.easeOutCubic,
+                            style: style.copyWith(
+                              color: current
+                                  ? lyricsHighlight
+                                  : Colors.white.withValues(
+                                      alpha: !_follow
+                                          ? .72
+                                          : (distance <= 1 ? .24 : .12),
+                                    ),
+                            ),
+                            child: Text(line.text.isEmpty ? '♪' : line.text),
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                );
-              },
+                  );
+                },
+              ),
             ),
           ),
           if (!_follow)
