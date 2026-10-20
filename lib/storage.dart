@@ -7,6 +7,7 @@ import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 
 import 'models.dart';
+import 'listening.dart';
 
 final class _Blob extends Struct {
   @Uint32()
@@ -114,11 +115,30 @@ class AppSettings {
   double volume = 70;
   LibrarySort librarySort = LibrarySort.newest;
   List<MusicChat> selectedChannels = [];
+  Set<String> favoriteIds = {};
+  Map<String, List<String>> playlists = {};
+  List<String> recentIds = [];
+  PlaybackRepeat repeatMode = PlaybackRepeat.off;
+  ListeningStats listening = ListeningStats();
+
+  static List<String> _ids(Object? value, int limit) => value is List
+      ? value
+            .whereType<String>()
+            .where((id) => id.isNotEmpty && id.length <= 200)
+            .toSet()
+            .take(limit)
+            .toList()
+      : [];
+
   Future<void> _saving = Future.value();
 
   Future<void> load() async {
     if (!await file.exists()) return;
-    final json = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+    applyJson(jsonDecode(await file.readAsString()) as Map<String, dynamic>);
+  }
+
+  void applyJson(Map<String, dynamic> json) {
+    listening = ListeningStats.fromJson(json['listening']);
     reducedMotion = json['reducedMotion'] == true;
     automaticUpdates = json['automaticUpdates'] != false;
     volume = (json['volume'] as num? ?? 70).toDouble().clamp(0, 100);
@@ -126,6 +146,26 @@ class AppSettings {
       (value) => value.name == json['librarySort'],
       orElse: () => LibrarySort.newest,
     );
+    favoriteIds = _ids(json['favoriteIds'], 10000).toSet();
+    recentIds = _ids(json['recentIds'], 100);
+    repeatMode = PlaybackRepeat.values.firstWhere(
+      (value) => value.name == json['repeatMode'],
+      orElse: () => PlaybackRepeat.off,
+    );
+    playlists = {};
+    final saved = json['playlists'];
+    if (saved is Map) {
+      final names = <String>{};
+      for (final entry in saved.entries.take(100)) {
+        final name = entry.key;
+        if (name is String &&
+            name.trim().isNotEmpty &&
+            name.length <= 60 &&
+            names.add(name.trim().toLowerCase())) {
+          playlists[name.trim()] = _ids(entry.value, 5000);
+        }
+      }
+    }
     selectedChannels = [
       for (final entry in (json['selectedChannels'] as List? ?? []))
         if (entry is Map && entry['id'] is int && entry['title'] is String)
@@ -133,19 +173,41 @@ class AppSettings {
     ];
   }
 
+  Map<String, dynamic> toJson() => {
+    'reducedMotion': reducedMotion,
+    'automaticUpdates': automaticUpdates,
+    'volume': volume,
+    'librarySort': librarySort.name,
+    'favoriteIds': favoriteIds.toList(),
+    'playlists': playlists,
+    'recentIds': recentIds,
+    'repeatMode': repeatMode.name,
+    'listening': listening.toJson(),
+    'selectedChannels': [
+      for (final channel in selectedChannels)
+        {'id': channel.id, 'title': channel.title},
+    ],
+  };
+
+  Future<void> replaceSnapshot(
+    Map<String, dynamic> snapshot,
+    List<int> recovery,
+  ) {
+    final data = utf8.encode(jsonEncode(snapshot));
+    final next = _saving.then((_) async {
+      await atomicWrite(
+        File('${file.parent.path}/auralis-before-restore.json'),
+        recovery,
+      );
+      await atomicWrite(file, data);
+      applyJson(jsonDecode(utf8.decode(data)) as Map<String, dynamic>);
+    });
+    _saving = next.then<void>((_) {}, onError: (Object _, StackTrace _) {});
+    return next;
+  }
+
   Future<void> save() {
-    final data = utf8.encode(
-      jsonEncode({
-        'reducedMotion': reducedMotion,
-        'automaticUpdates': automaticUpdates,
-        'volume': volume,
-        'librarySort': librarySort.name,
-        'selectedChannels': [
-          for (final channel in selectedChannels)
-            {'id': channel.id, 'title': channel.title},
-        ],
-      }),
-    );
+    final data = utf8.encode(jsonEncode(toJson()));
     // Serialize writes so a quick series of slider changes cannot race renames.
     final next = _saving.then((_) => atomicWrite(file, data));
     _saving = next.then<void>((_) {}, onError: (Object _, StackTrace _) {});
