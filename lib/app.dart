@@ -1042,7 +1042,7 @@ class _PlayerShellState extends State<PlayerShell> {
 
   Widget _library() => LayoutBuilder(
     builder: (context, box) {
-      final compact = box.maxHeight < 300;
+      final compact = box.maxHeight < 330;
       final tracks = _collectionTracks();
       final savedCount = collection == 'Favorites'
           ? player.settings.favoriteIds.length
@@ -1130,14 +1130,16 @@ class _PlayerShellState extends State<PlayerShell> {
                 ),
               ],
             ),
-          const SizedBox(height: 10),
-          _librarySummaryBar(
-            compact: compact,
-            trackCount: tracks.length,
-            savedCount: savedCount,
-            allSongs: collection == 'All songs',
-            recent: collection == 'Recently played',
-          ),
+          if (!compact) ...[
+            const SizedBox(height: 10),
+            _librarySummaryBar(
+              compact: box.maxWidth < 680,
+              trackCount: tracks.length,
+              savedCount: savedCount,
+              allSongs: collection == 'All songs',
+              recent: collection == 'Recently played',
+            ),
+          ],
           if (library.error != null) _banner(library.error!),
           if (library.loading) ...[
             const LinearProgressIndicator(minHeight: 2),
@@ -1500,6 +1502,79 @@ class _PlayerShellState extends State<PlayerShell> {
       ),
     ],
   );
+  Widget _miniNowPlaying(BoxConstraints box, Track? track) {
+    final coverSize = math.min(200.0, math.min(box.maxWidth - 18, box.maxHeight * .36));
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text('NOW PLAYING', style: TextStyle(color: muted, fontSize: 10, letterSpacing: 1.5)),
+        const SizedBox(height: 14),
+        Align(
+          alignment: Alignment.center,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(22),
+            child: SizedBox.square(
+              dimension: coverSize,
+              child: Artwork(
+                key: const ValueKey('now-playing-artwork'),
+                seed: track?.title ?? 'Auralis',
+                telegram: telegram,
+                track: track,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          track?.title ?? 'Find your next favorite',
+          key: const ValueKey('now-playing-title'),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          track?.artist ?? 'A space for the music you love',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(color: muted, fontSize: 12),
+        ),
+        const SizedBox(height: 14),
+        Row(
+          key: const ValueKey('now-playing-actions'),
+          children: [
+            Expanded(
+              child: FilledButton.tonalIcon(
+                onPressed: track == null
+                    ? null
+                    : () => setState(() {
+                        destination = 3;
+                        showLyrics = true;
+                        search.clear();
+                      }),
+                icon: const Icon(Icons.lyrics_rounded, size: 17),
+                label: const Text('Lyrics'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: FilledButton.tonalIcon(
+                key: const ValueKey('now-playing-queue'),
+                onPressed: () => setState(() {
+                  destination = 2;
+                  showLyrics = false;
+                  search.clear();
+                }),
+                icon: const Icon(Icons.queue_music_rounded, size: 17),
+                label: const Text('Queue'),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
   Widget _nowPlaying({bool compact = false}) {
     final track = player.current;
     return Material(
@@ -1507,6 +1582,7 @@ class _PlayerShellState extends State<PlayerShell> {
       child: LayoutBuilder(
         key: const ValueKey('now-playing-layout'),
         builder: (context, box) {
+          if (compact) return _miniNowPlaying(box, track);
           final scale = MediaQuery.textScalerOf(context)
               .scale(1)
               .clamp(1.0, 2.0);
@@ -1514,6 +1590,8 @@ class _PlayerShellState extends State<PlayerShell> {
           final upcoming = math.max(0, player.queue.length - player.index - 1);
           final wide = box.maxWidth >= (compact ? 340 : 900);
           final narrow = box.maxWidth < 560;
+          final condensed = box.maxHeight < 470;
+          final veryTight = box.maxHeight < 260;
           final reserved = compact
               ? 250.0
               : wide
@@ -1521,9 +1599,14 @@ class _PlayerShellState extends State<PlayerShell> {
               : narrow
               ? 410.0
               : 430.0;
-          final previewCount = ((box.maxHeight - reserved) / rowHeight)
+          final calculatedPreview = ((box.maxHeight - reserved) / rowHeight)
               .floor()
               .clamp(0, math.min(wide ? 3 : 2, upcoming));
+          final previewCount = box.maxWidth >= 700 &&
+                  box.maxHeight >= 280 &&
+                  upcoming > 0
+              ? (box.maxHeight >= 720 ? math.max(1, calculatedPreview) : 1)
+              : calculatedPreview;
           final mime = track?.mime.split('/').last.toUpperCase() ?? 'AUDIO';
           final duration = track?.duration ?? Duration.zero;
           final detailPill = [
@@ -1616,11 +1699,11 @@ class _PlayerShellState extends State<PlayerShell> {
               Text(
                 track?.title ?? 'Find your next favorite',
                 key: const ValueKey('now-playing-title'),
-                maxLines: 2,
+                maxLines: condensed ? 1 : 2,
                 overflow: TextOverflow.ellipsis,
                 textAlign: compact || wide ? TextAlign.left : TextAlign.center,
                 style: TextStyle(
-                  fontSize: compact ? 18 : narrow ? 22 : 28,
+                  fontSize: condensed ? 17 : narrow ? 22 : 28,
                   fontWeight: FontWeight.w800,
                   height: 1.05,
                   letterSpacing: -.8,
@@ -1629,26 +1712,25 @@ class _PlayerShellState extends State<PlayerShell> {
               const SizedBox(height: 8),
               Text(
                 track?.artist ?? 'A space for the music you love',
-                maxLines: 2,
+                maxLines: condensed ? 1 : 2,
                 overflow: TextOverflow.ellipsis,
                 textAlign: compact || wide ? TextAlign.left : TextAlign.center,
                 style: TextStyle(
                   color: const Color(0xFFD2CDDD),
-                  fontSize: compact ? 13 : 16,
+                  fontSize: condensed ? 12 : 16,
                   fontWeight: FontWeight.w500,
                   height: 1.2,
                 ),
               ),
-              const SizedBox(height: 12),
-              Align(
-                alignment: compact || wide
-                    ? Alignment.centerLeft
-                    : Alignment.center,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 8,
-                  ),
+              if (!condensed) ...[
+                const SizedBox(height: 12),
+                Align(
+                  alignment: wide ? Alignment.centerLeft : Alignment.center,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 8,
+                    ),
                   decoration: BoxDecoration(
                     color: const Color(0xFF17141D),
                     borderRadius: BorderRadius.circular(999),
@@ -1666,10 +1748,56 @@ class _PlayerShellState extends State<PlayerShell> {
                   ),
                 ),
               ),
+              ],
             ],
           );
 
-          final actions = Wrap(
+          final actions = condensed
+              ? Row(
+                  key: const ValueKey('now-playing-actions'),
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    IconButton(
+                      tooltip: 'Lyrics',
+                      onPressed: track == null ? null : () => setState(() {
+                        destination = 3;
+                        showLyrics = true;
+                        search.clear();
+                      }),
+                      icon: const Icon(Icons.lyrics_rounded),
+                    ),
+                    IconButton(
+                      key: const ValueKey('now-playing-queue'),
+                      tooltip: 'Queue',
+                      onPressed: () => setState(() {
+                        destination = 2;
+                        showLyrics = false;
+                        search.clear();
+                      }),
+                      icon: const Icon(Icons.queue_music_rounded),
+                    ),
+                    IconButton(
+                      tooltip: player.settings.favoriteIds.contains(track?.id)
+                          ? 'Remove from favorites' : 'Add to favorites',
+                      onPressed: track == null ? null : () async {
+                        try {
+                          await player.toggleFavorite(track);
+                        } on StateError catch (e) {
+                          _notice(e.message);
+                        }
+                      },
+                      icon: Icon(player.settings.favoriteIds.contains(track?.id)
+                          ? Icons.favorite_rounded : Icons.favorite_border_rounded),
+                    ),
+                    IconButton(
+                      tooltip: 'Add to playlist',
+                      onPressed: track == null ? null : () => _choosePlaylist(track),
+                      icon: const Icon(Icons.playlist_add_rounded),
+                    ),
+                    _sleepControl(),
+                  ],
+                )
+              : Wrap(
             key: const ValueKey('now-playing-actions'),
             alignment: wide || compact
                 ? WrapAlignment.start
@@ -1780,16 +1908,87 @@ class _PlayerShellState extends State<PlayerShell> {
           );
 
           final heroPanel = panel(
-            padding: EdgeInsets.all(compact ? 14 : 18),
-            radius: compact ? 28 : 34,
+            padding: EdgeInsets.all(condensed ? 10 : 18),
+            radius: condensed ? 22 : 34,
             child: LayoutBuilder(
               builder: (context, heroBox) {
                 final artSize = wide
-                    ? math.min(heroBox.maxHeight - 8, 340.0)
+                    ? math.min(heroBox.maxHeight - 8, condensed ? 170.0 : 340.0)
                     : math.min(
-                        compact ? 180.0 : (narrow ? 260.0 : 320.0),
-                        heroBox.maxHeight * (compact ? .36 : .48),
-                      ).clamp(120.0, 340.0);
+                        condensed ? 90.0 : (narrow ? 260.0 : 320.0),
+                        heroBox.maxHeight * (condensed ? .30 : .48),
+                      ).clamp(60.0, 340.0);
+                if (veryTight) {
+                  return Row(
+                    children: [
+                      SizedBox.square(
+                        dimension: math.max(44, math.min(72, heroBox.maxHeight - 8)),
+                        child: heroArtwork,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              track?.title ?? 'Find your next favorite',
+                              key: const ValueKey('now-playing-title'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                            ),
+                            Row(
+                              key: const ValueKey('now-playing-actions'),
+                              mainAxisAlignment: MainAxisAlignment.start,
+                              children: [
+                                IconButton(
+                                  tooltip: 'Lyrics',
+                                  onPressed: track == null ? null : () => setState(() {
+                                    destination = 3;
+                                    showLyrics = true;
+                                    search.clear();
+                                  }),
+                                  icon: const Icon(Icons.lyrics_rounded, size: 18),
+                                ),
+                                IconButton(
+                                  key: const ValueKey('now-playing-queue'),
+                                  tooltip: 'Queue',
+                                  onPressed: () => setState(() {
+                                    destination = 2;
+                                    showLyrics = false;
+                                    search.clear();
+                                  }),
+                                  icon: const Icon(Icons.queue_music_rounded, size: 18),
+                                ),
+                                IconButton(
+                                  tooltip: player.settings.favoriteIds.contains(track?.id)
+                                      ? 'Remove from favorites' : 'Add to favorites',
+                                  onPressed: track == null ? null : () async {
+                                    try {
+                                      await player.toggleFavorite(track);
+                                    } on StateError catch (e) {
+                                      _notice(e.message);
+                                    }
+                                  },
+                                  icon: Icon(player.settings.favoriteIds.contains(track?.id)
+                                      ? Icons.favorite_rounded : Icons.favorite_border_rounded, size: 18),
+                                ),
+                                IconButton(
+                                  tooltip: 'Add to playlist',
+                                  onPressed: track == null ? null : () => _choosePlaylist(track),
+                                  icon: const Icon(Icons.playlist_add_rounded, size: 18),
+                                ),
+                                _sleepControl(),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  );
+                }
                 return wide
                     ? Row(
                         crossAxisAlignment: CrossAxisAlignment.center,
@@ -1808,8 +2007,10 @@ class _PlayerShellState extends State<PlayerShell> {
                                 titleBlock,
                                 const SizedBox(height: 18),
                                 actions,
-                                const SizedBox(height: 18),
-                                utilityTray,
+                                if (!condensed) ...[
+                                  const SizedBox(height: 18),
+                                  utilityTray,
+                                ],
                               ],
                             ),
                           ),
@@ -1823,16 +2024,18 @@ class _PlayerShellState extends State<PlayerShell> {
                             dimension: artSize,
                             child: heroArtwork,
                           ),
-                          SizedBox(height: compact ? 12 : 16),
+                          SizedBox(height: condensed ? 8 : 16),
                           Flexible(
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 titleBlock,
-                                SizedBox(height: compact ? 12 : 16),
+                                SizedBox(height: condensed ? 8 : 16),
                                 actions,
-                                SizedBox(height: compact ? 12 : 16),
-                                utilityTray,
+                                if (!condensed) ...[
+                                  SizedBox(height: compact ? 12 : 16),
+                                  utilityTray,
+                                ],
                               ],
                             ),
                           ),
@@ -2243,62 +2446,122 @@ class _PlayerShellState extends State<PlayerShell> {
       ),
     );
 
+    final compactPreview = Material(
+      color: Colors.transparent,
+      child: InkWell(
+        key: const ValueKey('open-current-track'),
+        borderRadius: BorderRadius.circular(14),
+        onTap: player.current == null
+            ? null
+            : () => setState(() {
+                destination = 3;
+                search.clear();
+              }),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: SizedBox.square(
+                dimension: 36,
+                child: Artwork(
+                  seed: player.current?.title ?? 'Auralis',
+                  small: true,
+                  telegram: telegram,
+                  track: player.current,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    player.current?.title ?? 'Nothing playing',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                  ),
+                  Text(
+                    player.current?.artist ?? 'Choose a track',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 10, color: muted),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
     return Container(
       key: const ValueKey('player-bar'),
       decoration: const BoxDecoration(
         color: Color(0xFF17141D),
         border: Border(top: BorderSide(color: Color(0xFF302B39))),
       ),
-      padding: EdgeInsets.fromLTRB(narrow ? 12 : 18, 10, narrow ? 12 : 18, 12),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          progressBar,
-          const SizedBox(height: 10),
-          if (narrow)
-            Column(
+      padding: EdgeInsets.fromLTRB(narrow ? 10 : 18, narrow ? 4 : 10, narrow ? 10 : 18, narrow ? 6 : 12),
+      child: narrow
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                _playerPanel(child: preview),
-                const SizedBox(height: 10),
+                // Two compact control rows plus the seek bar. Never stack
+                // large full-size player cards on short phone windows.
+                progressBar,
+                const SizedBox(height: 4),
                 Row(
                   children: [
-                    Expanded(
-                      child: _playerPanel(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 8,
-                        ),
-                        child: Center(child: transportButtons),
-                      ),
-                    ),
+                    Expanded(child: compactPreview),
+                    const SizedBox(width: 4),
+                    transportButtons,
                   ],
                 ),
-                const SizedBox(height: 10),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: utilityButtons,
+                const SizedBox(height: 2),
+                Row(
+                  children: [
+                    IconButton(
+                      onPressed: player.toggleRepeat,
+                      tooltip: switch (player.repeatMode) {
+                        PlaybackRepeat.off => 'Repeat: off',
+                        PlaybackRepeat.all => 'Repeat: queue',
+                        PlaybackRepeat.one => 'Repeat: one track',
+                      },
+                      icon: Icon(
+                        player.repeatMode == PlaybackRepeat.one
+                            ? Icons.repeat_one_rounded
+                            : Icons.repeat_rounded,
+                        color: player.repeat ? accent : muted,
+                      ),
+                    ),
+                    _sleepControl(key: const ValueKey('sleep-timer-control')),
+                    const Spacer(),
+                    _volumeControl(true),
+                  ],
                 ),
               ],
             )
-          else
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
+          : Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Expanded(
-                  flex: 5,
-                  child: _playerPanel(child: preview),
+                progressBar,
+                const SizedBox(height: 10),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(flex: 5, child: _playerPanel(child: preview)),
+                    const SizedBox(width: 12),
+                    _playerPanel(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      child: transportButtons,
+                    ),
+                    const SizedBox(width: 12),
+                    utilityButtons,
+                  ],
                 ),
-                const SizedBox(width: 12),
-                _playerPanel(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  child: transportButtons,
-                ),
-                const SizedBox(width: 12),
-                utilityButtons,
               ],
             ),
-        ],
-      ),
     );
   }
 
@@ -2359,7 +2622,7 @@ class _PlayerShellState extends State<PlayerShell> {
                   const Divider(),
                 ],
                 Text(
-                  'Auralis ${widget.updater?.currentVersion ?? '0.1.31'} · AGPL-3.0-or-later\nIndependent Flutter interface. Playback by libmpv. Telegram connectivity by TDLib.',
+                  'Auralis ${widget.updater?.currentVersion ?? '0.1.32'} · AGPL-3.0-or-later\nIndependent Flutter interface. Playback by libmpv. Telegram connectivity by TDLib.',
                   style: const TextStyle(
                     color: muted,
                     fontSize: 12,
@@ -2402,7 +2665,7 @@ class _PlayerShellState extends State<PlayerShell> {
             onPressed: () => showLicensePage(
               context: context,
               applicationName: 'Auralis',
-              applicationVersion: widget.updater?.currentVersion ?? '0.1.31',
+              applicationVersion: widget.updater?.currentVersion ?? '0.1.32',
             ),
             child: const Text('Licenses'),
           ),
