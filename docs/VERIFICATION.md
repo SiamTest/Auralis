@@ -445,3 +445,14 @@ APK and its other post-build checks. The app code and app version are unchanged.
 ## 0.1.34+35 lyrics scroll-cache argument fix — 20 October 2026
 
 Replaced the integer passed to `scrollCacheExtent` in `lib/lyrics_view.dart` with `const ScrollCacheExtent.pixels(800)`, as required by Flutter’s typed cache-extent API. The existing rendering import supplies this type. Source inspection found no other cache-extent arguments in the project. Flutter and Dart are not installed in this editing environment, so the analyzer and Flutter tests could not be run locally; rerun the existing Android and Windows CI checks.
+
+
+## 0.1.35+36 responsive Now Playing layout — 20 October 2026
+
+The supplied Linux CI log reports four widget-test failures: the responsive UI test (77px bottom overflow), compact collection controls (14px right overflow), return from lyrics (120px bottom overflow), and adaptive Now Playing at 360×480 (14px right overflow). The inspector errors shown afterward occur while describing already-deactivated overflow render objects; they are not evidence here of a separate app disposal defect.
+
+The hero now decides its layout from its own constraints after the queue preview is allocated. Short layouts place artwork/title above the five action buttons instead of squeezing those buttons beside artwork into a 226px row. Actions wrap across the available width; narrow portrait layouts use icon buttons with their existing tooltips. Portrait artwork uses the space remaining after metadata/actions rather than forcing a percentage height above a non-shrinking details column. Extremely short panels retain the title while the artist remains available in the player bar. The companion sidebar cover also flexes around its fixed text/actions. Queue previews, every action, playback controls, and the no-page-scroll behavior remain covered by existing tests.
+
+The adaptive test additionally requires all five action buttons and artwork bounds to stay within the page across its existing nine sizes; the responsive Library expectation now reports its viewport size. Version metadata in pubspec, About, and the Telegram client is 0.1.35+36 / 0.1.35. The previous typed ScrollCacheExtent fix remains included.
+
+Local verification: all modified Dart files parse with the tree-sitter Dart grammar, and the packaged ZIP is checked for integrity and an exact expected file diff. This is syntax checking, not Flutter type analysis or runtime layout validation. Flutter/Dart are unavailable locally and the matching SDK could not be retrieved, so no widget-test or analyzer pass is claimed for this revision. Rerun `flutter analyze --no-pub --fatal-infos` and `flutter test --no-pub --reporter expanded` in the existing Android and Windows workflows. No APK/EXE build or release was performed locally.
