@@ -52,6 +52,7 @@ void main() {
       for (final name in [
         'Resolve locked dependencies',
         'Static analysis',
+        'Compile standalone native smoke check',
         'Automated tests',
         'Windows release build',
         'Native encryption, TDLib, playback, proxy and seek smoke test',
