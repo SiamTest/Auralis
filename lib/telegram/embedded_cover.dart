@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:isolate';
 import 'dart:typed_data';
 
@@ -5,8 +6,20 @@ typedef CoverRange = Future<Uint8List?> Function(int offset, int count);
 const maxCoverBytes = 4 * 1024 * 1024;
 
 /// Read metadata ranges, never the audio payload, and parse away from the UI.
-/// shortcut: ID3/FLAC/MP4 only, add other containers when needed.
-Future<Uint8List?> readEmbeddedCover(CoverRange source, int size) async {
+/// ponytail: ID3/FLAC/MP4 only; add other containers when needed.
+Future<Uint8List?> readEmbeddedCover(CoverRange source, int size) =>
+    _readMetadata(source, size, false);
+
+Future<String?> readEmbeddedLyrics(CoverRange source, int size) async {
+  final bytes = await _readMetadata(source, size, true);
+  return bytes == null ? null : utf8.decode(bytes);
+}
+
+Future<Uint8List?> _readMetadata(
+  CoverRange source,
+  int size,
+  bool lyrics,
+) async {
   var budget = maxCoverBytes;
   Future<Uint8List> read(int offset, int count) async {
     if (offset < 0 || count <= 0 || offset + count > size || count > budget) {
@@ -30,7 +43,7 @@ Future<Uint8List?> readEmbeddedCover(CoverRange source, int size) async {
       }
       final length = _number(head, 6, 4, sync: true);
       final body = await read(10, length);
-      return await _parse((0, body, version, head[5]));
+      return await _parse((0, body, version, head[5], lyrics));
     }
     if (_text(head, 0, 4) == 'fLaC') {
       var offset = 4;
@@ -39,11 +52,11 @@ Future<Uint8List?> readEmbeddedCover(CoverRange source, int size) async {
         final header = await read(offset, 4);
         final length = _number(header, 1, 3);
         offset += 4;
-        if (header[0] & 127 == 6) {
+        if (header[0] & 127 == (lyrics ? 4 : 6)) {
           final data = await read(offset, length);
-          final picture = await _parse((1, data, 0, 0));
+          final picture = await _parse((1, data, 0, 0, lyrics));
           if (picture != null) {
-            if (_number(data, 0, 4) == 3) return picture;
+            if (lyrics || _number(data, 0, 4) == 3) return picture;
             fallback ??= picture;
           }
         }
@@ -67,23 +80,23 @@ Future<Uint8List?> readEmbeddedCover(CoverRange source, int size) async {
       if (length < headerSize || offset + length > size) return null;
       if (_text(header, 4, 4) == 'moov') {
         final body = await read(offset + headerSize, length - headerSize);
-        return await _parse((2, body, 0, 0));
+        return await _parse((2, body, 0, 0, lyrics));
       }
       if (offset == 0 && _text(header, 4, 4) != 'ftyp') return null;
       offset += length;
     }
   } catch (_) {
-    // Absent, incomplete, oversized and malformed metadata use the placeholder.
+    // Absent, incomplete, oversized and malformed metadata use the UI fallback.
   }
   return null;
 }
 
 // Keep the worker closure separate from the TDLib/source callback context.
-Future<Uint8List?> _parse((int, Uint8List, int, int) job) => Isolate.run(
+Future<Uint8List?> _parse((int, Uint8List, int, int, bool) job) => Isolate.run(
   () => switch (job.$1) {
-    0 => _id3(job.$2, job.$3, job.$4),
-    1 => _flacPicture(job.$2),
-    _ => _mp4(job.$2, 0, job.$2.length, 0),
+    0 => _id3(job.$2, job.$3, job.$4, job.$5),
+    1 => job.$5 ? _comments(job.$2) : _flacPicture(job.$2),
+    _ => _mp4(job.$2, 0, job.$2.length, 0, job.$5),
   },
 );
 
@@ -120,7 +133,7 @@ bool isCoverImage(Uint8List data) =>
 
 Uint8List? _picture(Uint8List bytes) => isCoverImage(bytes) ? bytes : null;
 
-Uint8List? _id3(Uint8List input, int version, int flags) {
+Uint8List? _id3(Uint8List input, int version, int flags, bool lyrics) {
   final body = version < 4 && flags & 128 != 0 ? _unsync(input) : input;
   var offset = 0;
   if (version >= 3 && flags & 64 != 0) {
@@ -145,7 +158,9 @@ Uint8List? _id3(Uint8List input, int version, int flags) {
     final format = version == 2 ? 0 : body[offset + 9];
     offset += headerSize;
     if (length <= 0 || offset + length > body.length) break;
-    if ((id == 'APIC' || id == 'PIC') &&
+    if ((lyrics
+            ? ['USLT', 'ULT', 'SYLT', 'SLT', 'TXXX', 'TXX'].contains(id)
+            : id == 'APIC' || id == 'PIC') &&
         format & (version == 4 ? 12 : 192) == 0) {
       var frame = Uint8List.sublistView(body, offset, offset + length);
       if (version == 4 && (format & 2 != 0 || flags & 128 != 0)) {
@@ -155,6 +170,12 @@ Uint8List? _id3(Uint8List input, int version, int flags) {
           (format & (version == 4 ? 64 : 32) != 0 ? 1 : 0) +
           (version == 4 && format & 1 != 0 ? 4 : 0);
       if (p >= frame.length) return fallback;
+      if (lyrics) {
+        final found = _id3Lyrics(Uint8List.sublistView(frame, p), id);
+        if (found != null) return found;
+        offset += length;
+        continue;
+      }
       final encoding = frame[p++];
       if (id == 'PIC') {
         p += 3;
@@ -192,7 +213,7 @@ Uint8List? _flacPicture(Uint8List data) {
   return _picture(Uint8List.sublistView(data, p, p + length));
 }
 
-Uint8List? _mp4(Uint8List data, int offset, int end, int depth) {
+Uint8List? _mp4(Uint8List data, int offset, int end, int depth, bool lyrics) {
   if (depth > 8) return null;
   while (offset + 8 <= end) {
     var length = _number(data, offset, 4);
@@ -205,22 +226,151 @@ Uint8List? _mp4(Uint8List data, int offset, int end, int depth) {
     if (length == 0) length = end - offset;
     if (length < header || offset + length > end) return null;
     var start = offset + header;
-    if (type == 'covr') {
+    if (type == (lyrics ? '\xA9lyr' : 'covr')) {
       if (start + 16 <= offset + length &&
           _text(data, start + 4, 4) == 'data') {
         final count = _number(data, start, 4);
         if (count >= 16 && start + count <= offset + length) {
-          return _picture(
-            Uint8List.sublistView(data, start + 16, start + count),
-          );
+          final value = Uint8List.sublistView(data, start + 16, start + count);
+          if (!lyrics) return _picture(value);
+          final encoding = _number(data, start + 8, 4) & 0xFFFFFF;
+          if (encoding != 1 && encoding != 2) return null;
+          return _lyricBytes(_decodeText(value, encoding == 1 ? 3 : 2));
         }
       }
     } else if (['moov', 'udta', 'meta', 'ilst'].contains(type)) {
       if (type == 'meta' && _number(data, start, 4) == 0) start += 4;
-      final picture = _mp4(data, start, offset + length, depth + 1);
+      final picture = _mp4(data, start, offset + length, depth + 1, lyrics);
       if (picture != null) return picture;
     }
     offset += length;
+  }
+  return null;
+}
+
+// The same bounded container walker serves artwork and lyrics; no audio decoding.
+Uint8List? _lyricBytes(String text) {
+  text = text
+      .replaceAll('\r\n', '\n')
+      .replaceAll('\r', '\n')
+      .replaceAll('\x00', '')
+      .trim();
+  if (text.isEmpty || text.length > 256 * 1024) return null;
+  return Uint8List.fromList(utf8.encode(text));
+}
+
+String _decodeText(Uint8List bytes, int encoding, {bool little = false}) {
+  if (encoding == 0) return latin1.decode(bytes);
+  if (encoding == 3) return utf8.decode(bytes);
+  if (encoding != 1 && encoding != 2) {
+    throw const FormatException('Text encoding');
+  }
+  var offset = 0;
+  if (encoding == 1 && bytes.length >= 2) {
+    if (bytes[0] == 255 && bytes[1] == 254) {
+      little = true;
+      offset = 2;
+    }
+    if (bytes[0] == 254 && bytes[1] == 255) {
+      little = false;
+      offset = 2;
+    }
+  }
+  if ((bytes.length - offset).isOdd) {
+    throw const FormatException('UTF-16 length');
+  }
+  return String.fromCharCodes([
+    for (var i = offset; i + 1 < bytes.length; i += 2)
+      little ? bytes[i] | bytes[i + 1] << 8 : bytes[i] << 8 | bytes[i + 1],
+  ]);
+}
+
+Uint8List? _id3Lyrics(Uint8List frame, String id) {
+  if (frame.isEmpty) return null;
+  final encoding = frame[0], step = frame[0] == 1 || frame[0] == 2 ? 2 : 1;
+  var p = id == 'TXXX' || id == 'TXX' ? 1 : 4;
+  final synced = id == 'SYLT' || id == 'SLT';
+  if (synced) {
+    // MPEG-frame timestamps need a frame index; don't pretend they are milliseconds.
+    if (frame.length < 6 || frame[4] != 2 || frame[5] != 1) return null;
+    p = 6;
+  }
+  var little = false;
+  String terminated() {
+    final start = p;
+    while (p + step <= frame.length) {
+      if (frame[p] == 0 && (step == 1 || frame[p + 1] == 0)) {
+        final bytes = Uint8List.sublistView(frame, start, p);
+        if (encoding == 1 &&
+            bytes.length >= 2 &&
+            bytes[0] == 255 &&
+            bytes[1] == 254) {
+          little = true;
+        }
+        final text = _decodeText(bytes, encoding, little: little);
+        p += step;
+        return text;
+      }
+      p += step;
+    }
+    throw const FormatException('Unterminated lyric description');
+  }
+
+  final description = terminated();
+  if ((id == 'TXXX' || id == 'TXX') &&
+      ![
+        'LYRICS',
+        'UNSYNCEDLYRICS',
+        'SYNCEDLYRICS',
+      ].contains(description.toUpperCase())) {
+    return null;
+  }
+  if (!synced) {
+    return _lyricBytes(
+      _decodeText(Uint8List.sublistView(frame, p), encoding, little: little),
+    );
+  }
+  final lines = <String>[];
+  while (p < frame.length && lines.length < 2000) {
+    final text = terminated().replaceAll('\r', '').replaceAll('\n', ' ');
+    final ms = _number(frame, p, 4);
+    p += 4;
+    if (ms > 24 * 60 * 60 * 1000) return null;
+    lines.add(
+      '[${ms ~/ 60000}:${((ms ~/ 1000) % 60).toString().padLeft(2, '0')}.${(ms % 1000).toString().padLeft(3, '0')}]$text',
+    );
+  }
+  if (p < frame.length) return null;
+  return _lyricBytes(lines.join('\n'));
+}
+
+Uint8List? _comments(Uint8List data) {
+  var p = 0;
+  int length() {
+    final result = ByteData.sublistView(data).getUint32(p, Endian.little);
+    p += 4;
+    return result;
+  }
+
+  final vendorLength = length();
+  p += vendorLength;
+  final count = length();
+  if (count > 4096) return null;
+  for (var i = 0; i < count; i++) {
+    final size = length();
+    if (size > data.length - p) return null;
+    final text = utf8.decode(Uint8List.sublistView(data, p, p + size));
+    p += size;
+    final split = text.indexOf('=');
+    if (split >= 0 &&
+        [
+          'LYRICS',
+          'UNSYNCEDLYRICS',
+          'SYNCEDLYRICS',
+        ].contains(text.substring(0, split).toUpperCase())) {
+      final lyrics = _lyricBytes(text.substring(split + 1));
+      if (lyrics != null) return lyrics;
+    }
   }
   return null;
 }
