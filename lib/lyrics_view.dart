@@ -417,6 +417,7 @@ class _LyricsViewState extends State<LyricsView> {
     final selected = _synced == synced;
     final label = synced ? 'Synced' : 'Static';
     final icon = synced ? Icons.graphic_eq_rounded : Icons.article_rounded;
+    final largeText = MediaQuery.textScalerOf(context).scale(1) > 1.4;
     return Expanded(
       child: Semantics(
         selected: selected,
@@ -439,7 +440,7 @@ class _LyricsViewState extends State<LyricsView> {
                     : const Color(0xFF302B39),
               ),
             ),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+            padding: EdgeInsets.symmetric(horizontal: largeText ? 6 : 14, vertical: largeText ? 8 : 14),
             textStyle: Theme.of(context).textTheme.labelLarge?.copyWith(
               fontWeight: FontWeight.w700,
             ),
@@ -450,9 +451,13 @@ class _LyricsViewState extends State<LyricsView> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, size: 18),
-              const SizedBox(width: 8),
-              Text(label),
+              if (!largeText) ...[
+                Icon(icon, size: 18),
+                const SizedBox(width: 8),
+              ],
+              Flexible(
+                child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+              ),
             ],
           ),
         ),
@@ -749,115 +754,101 @@ class _LyricsViewState extends State<LyricsView> {
     );
   }
 
-  Widget _infoPanel(bool short) {
+  Widget _infoPanel() {
     final track = _track;
     final lyrics = _lyrics;
-    return Column(
-      children: [
-        _surfaceCard(
-          radius: 32,
-          padding: const EdgeInsets.all(18),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              AspectRatio(
-                aspectRatio: 1,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(26),
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF14121A),
-                      borderRadius: BorderRadius.circular(26),
+    return LayoutBuilder(
+      builder: (context, bounds) {
+        final tight = bounds.maxHeight < 530;
+        final veryTight = bounds.maxHeight < 390;
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _surfaceCard(
+              radius: 28,
+              padding: EdgeInsets.all(tight ? 12 : 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(20),
+                      child: SizedBox.square(
+                        dimension: veryTight ? 70 : tight ? 110 : 170,
+                        child: widget.artwork,
+                      ),
                     ),
-                    child: widget.artwork,
                   ),
-                ),
+                  SizedBox(height: tight ? 8 : 12),
+                  Text(
+                    track?.title ?? 'Nothing playing',
+                    maxLines: tight ? 1 : 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: tight ? 17 : 21,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    track?.artist ?? 'Choose a track first',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12, color: Color(0xFFB0ABBA)),
+                  ),
+                  if (!veryTight) ...[
+                    SizedBox(height: tight ? 8 : 12),
+                    Container(
+                      width: double.infinity,
+                      padding: EdgeInsets.all(tight ? 10 : 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF15131A),
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: const Color(0xFF2B2733)),
+                      ),
+                      child: Text(
+                        lyrics == null ? 'No lyrics loaded yet.' : _sourceText(lyrics),
+                        maxLines: tight ? 2 : 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFFE7E2F3),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
               ),
-              const SizedBox(height: 16),
-              Text(
-                track?.title ?? 'Nothing playing',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: short ? 20 : 22,
-                  fontWeight: FontWeight.w800,
-                  height: 1.15,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                track?.artist ?? 'Choose a track first',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 14,
-                  color: Color(0xFFB0ABBA),
-                  height: 1.4,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF15131A),
-                  borderRadius: BorderRadius.circular(22),
-                  border: Border.all(color: const Color(0xFF2B2733)),
-                ),
+            ),
+            if (lyrics != null && !lyrics.instrumental) ...[
+              SizedBox(height: tight ? 8 : 12),
+              _surfaceCard(
+                radius: 24,
+                padding: EdgeInsets.all(tight ? 10 : 14),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'Lyrics source',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Color(0xFF9D97AC),
-                        fontWeight: FontWeight.w700,
+                    if (!veryTight) ...[
+                      const Text(
+                        'Reading mode',
+                        style: TextStyle(fontSize: 12, color: Color(0xFF9D97AC)),
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      lyrics == null ? 'No lyrics loaded yet.' : _sourceText(lyrics),
-                      style: const TextStyle(
-                        fontSize: 13,
-                        height: 1.35,
-                        color: Color(0xFFE7E2F3),
-                        fontWeight: FontWeight.w600,
-                      ),
+                      const SizedBox(height: 6),
+                    ],
+                    Row(
+                      children: [
+                        _mode(true),
+                        const SizedBox(width: 8),
+                        _mode(false),
+                      ],
                     ),
                   ],
                 ),
               ),
             ],
-          ),
-        ),
-        const SizedBox(height: 12),
-        if (lyrics != null && !lyrics.instrumental)
-          _surfaceCard(
-            radius: 28,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Reading mode',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: Color(0xFF9D97AC),
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    _mode(true),
-                    const SizedBox(width: 10),
-                    _mode(false),
-                  ],
-                ),
-              ],
-            ),
-          ),
-      ],
+          ],
+        );
+      },
     );
   }
 
@@ -899,7 +890,7 @@ class _LyricsViewState extends State<LyricsView> {
             const SizedBox(width: 16),
             SizedBox(
               width: 320,
-              child: _infoPanel(short),
+              child: _infoPanel(),
             ),
           ],
         ),
@@ -931,7 +922,7 @@ class _LyricsViewState extends State<LyricsView> {
         color: lyricsBackground,
         child: LayoutBuilder(
           builder: (context, box) {
-            final short = box.maxHeight < 420;
+            final short = box.maxHeight < 620;
             final wide = box.maxWidth >= 1000 && box.maxHeight >= 560;
             return Padding(
               padding: EdgeInsets.fromLTRB(16, short ? 8 : 16, 16, short ? 8 : 14),
@@ -1141,6 +1132,7 @@ class _SyncedLyricsState extends State<_SyncedLyrics> {
               child: ListView.builder(
                 key: const ValueKey('synced-lyrics'),
                 controller: _scroll,
+                cacheExtent: 800,
                 padding: EdgeInsets.symmetric(vertical: box.maxHeight * .5),
                 itemCount: widget.lyrics.lines.length,
                 itemExtentBuilder: (index, _) => _heights[index],
