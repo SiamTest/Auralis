@@ -5,7 +5,7 @@ import 'package:auralis/android_audio.dart';
 import 'package:auralis/data_files.dart';
 import 'package:auralis/models.dart';
 import 'package:auralis/player.dart';
-import 'package:auralis/storage.dart';
+import 'package:auralis/android_storage.dart';
 import 'package:auralis/telegram/stream_proxy.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/services.dart';
@@ -169,6 +169,23 @@ void main() {
       expect(jobs['build']['runs-on'], 'ubuntu-24.04');
       expect(workflow['permissions']['contents'], 'read');
       final steps = jobs['build']['steps'] as YamlList;
+      final sdk = steps.singleWhere((s) => s['name'] == 'Set up Android SDK');
+      expect(
+        sdk['uses'],
+        matches(RegExp(r'^android-actions/setup-android@[0-9a-f]{40}$')),
+      );
+      expect(sdk['if'], isNull);
+      expect(sdk['with']['packages'], 'platform-tools');
+      final tools = steps.singleWhere(
+        (s) => s['name'] == 'Install Android and host build tools',
+      );
+      expect(steps.indexOf(sdk), lessThan(steps.indexOf(tools)));
+      expect(
+        tools['run'],
+        contains(
+          "sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;28.2.13676358'",
+        ),
+      );
       final build = steps.singleWhere((s) => s['name'] == 'Build Android APK');
       expect(build['run'], contains('flutter build apk'));
       expect(build['run'], contains('android-arm64'));
