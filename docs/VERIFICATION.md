@@ -440,3 +440,8 @@ The build container does not have Flutter/Dart or an Android SDK, so an actual
 APK build, Flutter widget tests and Android device installation were not run
 locally. Re-run the Android GitHub Action to confirm an ABI-pure debug/release
 APK and its other post-build checks. The app code and app version are unchanged.
+
+
+## 0.1.34+35 lyrics scroll-cache argument fix — 20 October 2026
+
+Replaced the integer passed to `scrollCacheExtent` in `lib/lyrics_view.dart` with `const ScrollCacheExtent.pixels(800)`, as required by Flutter’s typed cache-extent API. The existing rendering import supplies this type. Source inspection found no other cache-extent arguments in the project. Flutter and Dart are not installed in this editing environment, so the analyzer and Flutter tests could not be run locally; rerun the existing Android and Windows CI checks.
