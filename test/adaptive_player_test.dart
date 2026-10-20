@@ -197,6 +197,7 @@ void main() {
         const Size(760, 650),
         const Size(900, 480),
         const Size(1000, 700),
+        const Size(1018, 680),
         const Size(1280, 800),
         const Size(1920, 1080),
       ];
@@ -258,6 +259,17 @@ void main() {
           find.byKey(const ValueKey('now-playing-queue')).hitTestable(),
           findsOneWidget,
         );
+        if (size.width >= 760 && size.height >= 650) {
+          final next = find.byKey(const ValueKey('now-playing-next-0'));
+          expect(
+            next.hitTestable(),
+            findsOneWidget,
+            reason: '$size must show the next song',
+          );
+          final page = tester.getRect(layout), row = tester.getRect(next);
+          expect(row.bottom, lessThanOrEqualTo(page.bottom));
+          expect(row.top, greaterThanOrEqualTo(page.top));
+        }
         final artPosition = tester.getRect(
           find.byKey(const ValueKey('now-playing-artwork')),
         );
@@ -270,7 +282,7 @@ void main() {
           tester.getRect(find.byKey(const ValueKey('now-playing-artwork'))),
           artPosition,
         );
-        if (size.width == 360 || size.width == 1920) {
+        if (size.width == 360 || size.width == 1000 || size.width == 1920) {
           await tester.runAsync(() async {
             final render =
                 boundary.currentContext!.findRenderObject()!
