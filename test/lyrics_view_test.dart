@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:auralis/app.dart';
+import 'package:auralis/data_files.dart';
 import 'package:auralis/lyrics.dart';
 import 'package:auralis/lyrics_view.dart';
 import 'package:auralis/models.dart';
@@ -41,6 +43,32 @@ class PendingLyrics extends LyricsRepository {
   }
 }
 
+class LrcFiles extends DataFiles {
+  String? path = 'selected.lrc';
+  Uint8List bytes = Uint8List.fromList(
+    utf8.encode('[00:00]Original imported line'),
+  );
+  Completer<String?>? pending;
+  int? limit;
+  @override
+  Future<String?> openLyrics() => pending?.future ?? Future.value(path);
+  @override
+  Future<Uint8List> readBytes(
+    String path, {
+    int maxBytes = 64 * 1024 * 1024,
+  }) async {
+    limit = maxBytes;
+    return bytes;
+  }
+}
+
+Future<void> chooseImport(WidgetTester tester) async {
+  await tester.tap(find.byTooltip('Lyrics options').first);
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('Import .lrc file').last);
+  await tester.pumpAndSettle();
+}
+
 PlayerController controller() =>
     PlayerController(
         FakeAudio()..duration = const Duration(minutes: 5),
@@ -50,23 +78,29 @@ PlayerController controller() =>
       ..queue.add(song)
       ..index = 0;
 
-Widget view(PlayerController player, LyricsRepository repository) =>
-    MaterialApp(
-      theme: ThemeData.dark().copyWith(
-        textTheme: ThemeData.dark().textTheme.apply(fontFamily: 'Segoe UI'),
+Widget view(
+  PlayerController player,
+  LyricsRepository repository, {
+  Future<Lyrics?> Function(Track)? embedded,
+  DataFiles files = const DataFiles(),
+}) => MaterialApp(
+  theme: ThemeData.dark().copyWith(
+    textTheme: ThemeData.dark().textTheme.apply(fontFamily: 'Segoe UI'),
+  ),
+  home: Scaffold(
+    body: ListenableBuilder(
+      listenable: player,
+      builder: (_, _) => LyricsView(
+        player: player,
+        repository: repository,
+        loadEmbedded: embedded,
+        files: files,
+        artwork: const Icon(Icons.album),
+        onBack: () {},
       ),
-      home: Scaffold(
-        body: ListenableBuilder(
-          listenable: player,
-          builder: (_, _) => LyricsView(
-            player: player,
-            repository: repository,
-            artwork: const Icon(Icons.album),
-            onBack: () {},
-          ),
-        ),
-      ),
-    );
+    ),
+  ),
+);
 
 void main() {
   setUpAll(() async {
@@ -83,6 +117,125 @@ void main() {
     await (FontLoader(
       'MaterialIcons',
     )..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'))).load();
+  });
+
+  testWidgets(
+    'imports LRC; cancellation and invalid files preserve existing lyrics',
+    (tester) async {
+      final player = controller();
+      final repository = LyricsRepository();
+      final files = LrcFiles();
+      addTearDown(player.shutdown);
+      addTearDown(repository.close);
+      await tester.pumpWidget(view(player, repository, files: files));
+      await tester.tap(find.widgetWithText(TextButton, 'Import .lrc file'));
+      await tester.pumpAndSettle();
+      expect(find.text('Original imported line'), findsOneWidget);
+      expect(find.text('Imported LRC · session only'), findsOneWidget);
+      expect(repository.cached(song)!.imported, isTrue);
+      expect(files.limit, Lyrics.maxFileBytes);
+      final imported = repository.cached(song);
+      files.path = null;
+      await chooseImport(tester);
+      expect(repository.cached(song), same(imported));
+      files.path = 'invalid.lrc';
+      files.bytes = Uint8List.fromList([255]);
+      await chooseImport(tester);
+      expect(repository.cached(song), same(imported));
+      expect(find.textContaining('Could not import lyrics.'), findsOneWidget);
+      expect(find.text('Original imported line'), findsOneWidget);
+    },
+  );
+
+  testWidgets('an import picked for a previous song is discarded', (
+    tester,
+  ) async {
+    final player = controller();
+    final repository = LyricsRepository();
+    final files = LrcFiles()..pending = Completer<String?>();
+    addTearDown(player.shutdown);
+    addTearDown(repository.close);
+    await tester.pumpWidget(view(player, repository, files: files));
+    await tester.tap(find.widgetWithText(TextButton, 'Import .lrc file'));
+    await tester.pump();
+    player.queue.add(second);
+    player.index = 1;
+    player.notifyListeners();
+    await tester.pump();
+    files.pending!.complete('selected.lrc');
+    await tester.pumpAndSettle();
+    expect(repository.cached(song), isNull);
+    expect(repository.cached(second), isNull);
+    expect(files.limit, isNull);
+  });
+
+  testWidgets(
+    'embedded lyrics load automatically and late songs cannot overwrite',
+    (tester) async {
+      final player = controller();
+      final repository = LyricsRepository();
+      addTearDown(player.shutdown);
+      addTearDown(repository.close);
+      final pending = Completer<Lyrics?>();
+      var calls = 0;
+      Future<Lyrics?> load(Track track) async {
+        calls++;
+        if (track.id == song.id) return pending.future;
+        return Lyrics.parse('Original embedded second song', embedded: true);
+      }
+
+      await tester.pumpWidget(view(player, repository, embedded: load));
+      expect(calls, 1);
+      player.queue.add(second);
+      player.index = 1;
+      player.notifyListeners();
+      await tester.pumpAndSettle();
+      expect(find.text('Original embedded second song'), findsOneWidget);
+      expect(find.text('Lyrics from music file'), findsOneWidget);
+      pending.complete(
+        Lyrics.parse('Stale embedded first song', embedded: true),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Stale embedded first song'), findsNothing);
+      expect(repository.cached(second)!.embedded, isTrue);
+      expect(
+        tester
+            .widget<Material>(find.byKey(const ValueKey('lyrics-immersive')))
+            .color,
+        const Color(0xFF111015),
+      );
+      expect(lyricsHighlight, accent);
+    },
+  );
+
+  testWidgets('cached pasted lyrics take precedence over embedded tags', (
+    tester,
+  ) async {
+    final player = controller();
+    final repository = LyricsRepository()
+      ..save(song, Lyrics.parse('Original pasted words'));
+    addTearDown(player.shutdown);
+    addTearDown(repository.close);
+    var calls = 0;
+    await tester.pumpWidget(
+      view(
+        player,
+        repository,
+        embedded: (_) async {
+          calls++;
+          return Lyrics.parse('Original embedded words', embedded: true);
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(calls, 0);
+    expect(find.text('Original pasted words'), findsOneWidget);
+    await tester.tap(find.byTooltip('Lyrics options').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Read lyrics from music file'));
+    await tester.pumpAndSettle();
+    expect(calls, 1);
+    expect(find.text('Original embedded words'), findsOneWidget);
   });
 
   testWidgets(
