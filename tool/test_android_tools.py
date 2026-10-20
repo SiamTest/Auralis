@@ -2,6 +2,7 @@ import base64
 import importlib.util
 import os
 from pathlib import Path
+import shutil
 import struct
 import subprocess
 import tempfile
@@ -35,6 +36,17 @@ def elf(machine=183, alignment=16384):
 class AndroidToolsTest(unittest.TestCase):
     def test_source_is_complete_and_contains_no_signing_files(self):
         verify.verify_source(Path(__file__).resolve().parents[1])
+
+    def test_source_rejects_gradle_below_flutter_minimum(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temp:
+            fixture = Path(temp)
+            shutil.copytree(root / 'android', fixture / 'android',
+                            ignore=shutil.ignore_patterns('.gradle', 'build', 'local.properties', 'jniLibs'))
+            wrapper = fixture / 'android/gradle/wrapper/gradle-wrapper.properties'
+            wrapper.write_text(wrapper.read_text().replace('gradle-8.14.3-bin.zip', 'gradle-8.13-bin.zip'))
+            with self.assertRaisesRegex(AssertionError, 'requires Gradle 8.14'):
+                verify.verify_source(fixture)
 
     def test_native_validation_rejects_wrong_architecture_and_alignment(self):
         verify.verify_elf(elf(), 'arm64-v8a')
