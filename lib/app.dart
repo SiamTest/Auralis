@@ -1427,13 +1427,16 @@ class _PlayerShellState extends State<PlayerShell> {
           final scale = MediaQuery.textScalerOf(context)
               .scale(1)
               .clamp(1.0, 2.0);
-          final horizontal = box.maxHeight < 420 * scale;
           final rowHeight = 54.0 * scale;
           final upcoming = math.max(0, player.queue.length - player.index - 1);
           final previewCount =
-              ((box.maxHeight - (compact ? 400 : 520) * scale) / rowHeight)
+              ((box.maxHeight - (compact ? 264 : 240) * scale) / rowHeight)
                   .floor()
                   .clamp(0, math.min(3, upcoming));
+          // Reserve queue rows first, then fit the cover/details to what remains.
+          final horizontal =
+              box.maxHeight - previewCount * rowHeight <
+              (box.maxWidth < 500 ? 300 : 420) * scale;
           final cover = Artwork(
             key: const ValueKey('now-playing-artwork'),
             seed: track?.title ?? 'Auralis',
@@ -1611,7 +1614,7 @@ class _PlayerShellState extends State<PlayerShell> {
                 children: [
                   Expanded(
                     child: Text(
-                      'UP NEXT · $upcoming tracks',
+                      '${previewCount == 0 ? 'QUEUE' : 'UP NEXT'} · $upcoming tracks',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(color: muted, fontSize: 10),
@@ -1631,6 +1634,7 @@ class _PlayerShellState extends State<PlayerShell> {
               ),
               for (var offset = 0; offset < previewCount; offset++)
                 SizedBox(
+                  key: ValueKey('now-playing-next-$offset'),
                   height: rowHeight,
                   child: ListTile(
                     dense: true,
@@ -1986,7 +1990,7 @@ class _PlayerShellState extends State<PlayerShell> {
                   const Divider(),
                 ],
                 Text(
-                  'Auralis ${widget.updater?.currentVersion ?? '0.1.21'} · AGPL-3.0-or-later\nIndependent Flutter interface. Playback by libmpv. Telegram connectivity by TDLib.',
+                  'Auralis ${widget.updater?.currentVersion ?? '0.1.24'} · AGPL-3.0-or-later\nIndependent Flutter interface. Playback by libmpv. Telegram connectivity by TDLib.',
                   style: const TextStyle(
                     color: muted,
                     fontSize: 12,
@@ -2029,7 +2033,7 @@ class _PlayerShellState extends State<PlayerShell> {
             onPressed: () => showLicensePage(
               context: context,
               applicationName: 'Auralis',
-              applicationVersion: widget.updater?.currentVersion ?? '0.1.21',
+              applicationVersion: widget.updater?.currentVersion ?? '0.1.24',
             ),
             child: const Text('Licenses'),
           ),
