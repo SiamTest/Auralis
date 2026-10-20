@@ -1,12 +1,13 @@
 name: auralis
 description: Independent, compact Windows music player with TDLib Telegram browsing.
 publish_to: none
-version: 0.1.13+14
+version: 0.1.16+17
 environment:
   sdk: ^3.13.1
 dependencies:
   flutter:
     sdk: flutter
+  file_selector: 1.1.0
   ffi: 2.2.0
   path: 1.9.1
   path_provider: 2.1.6
