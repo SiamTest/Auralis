@@ -308,7 +308,7 @@ class _LyricsViewState extends State<LyricsView> {
               value: 'embedded',
               enabled: _track != null && !_loading,
               icon: Icons.music_note_rounded,
-              title: 'Read from music file',
+              title: 'Read lyrics from music file',
               subtitle: 'Try embedded lyrics from this track.',
             ),
           _menuAction(
