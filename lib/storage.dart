@@ -2,9 +2,9 @@ import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
+import 'package:flutter/services.dart';
 
 import 'models.dart';
 import 'listening.dart';
@@ -78,7 +78,7 @@ class SecretVault {
 
   Future<Map<String, dynamic>> read() async {
     if (!await file.exists()) return {};
-    final plain = protector.transform(await file.readAsBytes(), encrypt: false);
+    final plain = await transform(await file.readAsBytes(), encrypt: false);
     try {
       return jsonDecode(utf8.decode(plain)) as Map<String, dynamic>;
     } finally {
@@ -89,14 +89,34 @@ class SecretVault {
   Future<void> write(Map<String, dynamic> secrets) async {
     final bytes = utf8.encode(jsonEncode(secrets));
     try {
-      await atomicWrite(file, protector.transform(bytes, encrypt: true));
+      await atomicWrite(file, await transform(bytes, encrypt: true));
     } finally {
       bytes.fillRange(0, bytes.length, 0);
     }
   }
 
+  Future<Uint8List> transform(List<int> bytes, {required bool encrypt}) async =>
+      protector.transform(bytes, encrypt: encrypt);
+
   static String newDatabaseKey() =>
       base64Encode(List.generate(32, (_) => Random.secure().nextInt(256)));
+}
+
+/// Android's non-exportable AES key lives in Android Keystore, outside backups.
+class AndroidSecretVault extends SecretVault {
+  AndroidSecretVault(super.file);
+  static const _channel = MethodChannel('app.auralis/platform');
+  @override
+  Future<Uint8List> transform(List<int> bytes, {required bool encrypt}) async {
+    final result = await _channel.invokeMethod<Uint8List>(
+      encrypt ? 'encrypt' : 'decrypt',
+      Uint8List.fromList(bytes),
+    );
+    if (result == null) {
+      throw StateError('Android credential encryption failed.');
+    }
+    return result;
+  }
 }
 
 Future<void> atomicWrite(File file, List<int> data) async {
