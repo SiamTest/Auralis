@@ -84,6 +84,8 @@ class Client implements HttpClient {
 class Helper extends Fake implements Process {
   bool killed = false;
   @override
+  int get pid => 4242;
+  @override
   bool kill([ProcessSignal signal = ProcessSignal.sigterm]) {
     killed = true;
     return true;
@@ -194,12 +196,74 @@ void main() {
       directory: Directory('${dir.path}/updates'),
       settings: settings,
       client: client,
-      launchHelper: launch,
+      launchHelper: launch == null
+          ? null
+          : (script, installer, digest) async {
+              final helper = await launch(script, installer, digest);
+              await File('${installer.parent.path}/update-helper.ready')
+                  .writeAsString('${helper.pid}');
+              return helper;
+            },
       requestExit: exit,
     );
     addTearDown(result.dispose);
     return result;
   }
+
+  test('helper readiness rejects missing or wrong acknowledgements and early failure', () async {
+    final ready = File('${dir.path}/ready'),
+        failure = File('${dir.path}/error');
+    await expectLater(
+      waitForUpdateHelper(ready, failure, 4242, timeout: Duration.zero),
+      throwsA(isA<TimeoutException>()),
+    );
+    await ready.writeAsString('1111');
+    await expectLater(
+      waitForUpdateHelper(ready, failure, 4242, timeout: Duration.zero),
+      throwsA(isA<TimeoutException>()),
+    );
+    await ready.writeAsString('4242');
+    await waitForUpdateHelper(ready, failure, 4242, timeout: Duration.zero);
+    await failure.writeAsString('early startup failure');
+    await expectLater(
+      waitForUpdateHelper(ready, failure, 4242),
+      throwsStateError,
+    );
+  });
+
+  test(
+    'an early helper error leaves the app running and allows retry',
+    () async {
+      var exited = false;
+      final helper = Helper();
+      var fail = true;
+      final updates = updater(
+        Client([metadata(), Response(installerBytes)]),
+        launch: (_, installer, _) async {
+          if (fail) {
+            await File('${installer.parent.path}/update-error.txt')
+                .writeAsString('fixture error');
+          }
+          return helper;
+        },
+        exit: () async {
+          exited = true;
+          return true;
+        },
+      );
+      await updates.check();
+      await updates.download();
+      await updates.install();
+      expect(exited, isFalse);
+      expect(helper.killed, isTrue);
+      expect(updates.installing, isFalse);
+      expect(updates.error, contains('stayed open'));
+      fail = false;
+      await updates.install();
+      expect(exited, isTrue);
+      expect(updates.error, isNull);
+    },
+  );
 
   test('successful download matches GitHub digest; helper starts before graceful exit', () async {
     final events = <String>[];
