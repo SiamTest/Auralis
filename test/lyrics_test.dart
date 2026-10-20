@@ -1,4 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:auralis/data_files.dart';
 
 import 'package:auralis/lyrics.dart';
 import 'package:auralis/models.dart';
@@ -15,6 +19,65 @@ const song = Track(
 );
 
 void main() {
+  test(
+    'LRC file decoding supports UTF8/BOM and UTF16 with bounded valid content',
+    () {
+      const text = '[00:01.50]Original 日本語\r\n[00:03]Another line';
+      final encoded = [
+        utf8.encode(text),
+        [239, 187, 191, ...utf8.encode(text)],
+        [
+          255,
+          254,
+          for (final c in text.codeUnits) ...[c & 255, c >> 8],
+        ],
+        [
+          254,
+          255,
+          for (final c in text.codeUnits) ...[c >> 8, c & 255],
+        ],
+      ];
+      for (final bytes in encoded) {
+        final lyrics = Lyrics.fromFileBytes(Uint8List.fromList(bytes));
+        expect(lyrics.imported, isTrue);
+        expect(lyrics.online, isFalse);
+        expect(lyrics.lines.first.text, 'Original 日本語');
+        expect(lyrics.lines.first.time, const Duration(milliseconds: 1500));
+      }
+      for (final bytes in [
+        <int>[],
+        [255],
+        [255, 254, 65],
+        List.filled(Lyrics.maxFileBytes + 1, 65),
+        utf8.encode(List.filled(2001, '[00:01]line').join('\n')),
+      ]) {
+        expect(
+          () => Lyrics.fromFileBytes(Uint8List.fromList(bytes)),
+          throwsFormatException,
+        );
+      }
+    },
+  );
+
+  test('local LRC reads enforce the smaller lyric byte limit', () async {
+    final directory = await Directory.systemTemp.createTemp('auralis-lrc-');
+    addTearDown(() => directory.delete(recursive: true));
+    final file = File('${directory.path}/words.lrc');
+    await file.writeAsString('[00:00]Original file words');
+    const files = DataFiles();
+    expect(
+      Lyrics.fromFileBytes(
+        await files.readBytes(file.path, maxBytes: Lyrics.maxFileBytes),
+      ).lines.single.text,
+      'Original file words',
+    );
+    await file.writeAsBytes(List.filled(Lyrics.maxFileBytes + 1, 65));
+    await expectLater(
+      files.readBytes(file.path, maxBytes: Lyrics.maxFileBytes),
+      throwsFormatException,
+    );
+  });
+
   test('LRC sorts repeated timestamps, merges translations, supports fractions and gaps', () {
     final lyrics = Lyrics.parse(
       '[ar:Test]\n[offset:-50]\n[00:12.5][00:25.123]Evening waves\n[00:02]Small lights\n[00:12.50]Translation\n[00:20.00]\n[01:99]Invalid',
