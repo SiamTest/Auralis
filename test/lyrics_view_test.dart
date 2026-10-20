@@ -208,6 +208,37 @@ void main() {
     },
   );
 
+  testWidgets('both lyrics menus keep their action labels', (tester) async {
+    final player = controller();
+    final repository = LyricsRepository()
+      ..save(song, Lyrics.parse('Cached lyrics'));
+    addTearDown(player.shutdown);
+    addTearDown(repository.close);
+
+    await tester.pumpWidget(
+      view(
+        player,
+        repository,
+        embedded: (_) async => Lyrics.parse('Embedded lyrics', embedded: true),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final buttons = find.byTooltip('Lyrics options');
+    expect(buttons, findsNWidgets(2));
+
+    for (final index in [0, 1]) {
+      await tester.tap(buttons.at(index));
+      await tester.pumpAndSettle();
+      expect(find.text('Import .lrc file'), findsOneWidget);
+      expect(find.text('Read lyrics from music file'), findsOneWidget);
+      expect(find.text('Find lyrics on LRCLIB'), findsOneWidget);
+      expect(find.text('Paste lyrics'), findsOneWidget);
+      await tester.tapAt(const Offset(5, 5));
+      await tester.pumpAndSettle();
+      expect(find.text('Read lyrics from music file'), findsNothing);
+    }
+  });
+
   testWidgets('cached pasted lyrics take precedence over embedded tags', (
     tester,
   ) async {
