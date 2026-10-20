@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Reject incomplete/wrong-ABI APKs and native libraries incompatible with 16 KiB pages."""
+import re
 import struct
 import sys
 from pathlib import Path
@@ -50,6 +51,12 @@ def verify_apk(path, abi):
 
 def verify_source(root):
     android = root / "android"
+    wrapper = (android / "gradle/wrapper/gradle-wrapper.properties").read_text()
+    version = re.search(r"distributionUrl=.*gradle-(\d+)\.(\d+)(?:\.(\d+))?-bin\.zip", wrapper)
+    assert version, "A pinned Gradle binary distribution is required."
+    # Flutter 3.47.1 rejects Gradle below 8.14 before applying the app plugin.
+    assert tuple(int(v or 0) for v in version.groups()) >= (8, 14, 0), "Flutter 3.47.1 requires Gradle 8.14 or newer."
+    assert re.search(r"(?m)^distributionSha256Sum=[a-f0-9]{64}$", wrapper), "Gradle distribution checksum is required."
     manifest = ET.parse(android / "app/src/main/AndroidManifest.xml").getroot()
     ns = "{http://schemas.android.com/apk/res/android}"
     permissions = {node.get(ns + "name") for node in manifest.findall("uses-permission")}
