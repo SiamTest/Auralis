@@ -359,7 +359,7 @@ void main() {
         expect(find.text('Connect Telegram for your music'), findsOneWidget);
         expect(find.text('Choose audio files'), findsNothing);
         expect(find.text('Add music'), findsNothing);
-        expect(tester.takeException(), isNull);
+        expect(tester.takeException(), isNull, reason: '$size Library');
         if (size.width == 1280) {
           final render =
               boundary.currentContext!.findRenderObject()!
