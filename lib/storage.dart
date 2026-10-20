@@ -2,9 +2,9 @@ import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
-import 'package:flutter/services.dart';
 
 import 'models.dart';
 import 'listening.dart';
@@ -100,23 +100,6 @@ class SecretVault {
 
   static String newDatabaseKey() =>
       base64Encode(List.generate(32, (_) => Random.secure().nextInt(256)));
-}
-
-/// Android's non-exportable AES key lives in Android Keystore, outside backups.
-class AndroidSecretVault extends SecretVault {
-  AndroidSecretVault(super.file);
-  static const _channel = MethodChannel('app.auralis/platform');
-  @override
-  Future<Uint8List> transform(List<int> bytes, {required bool encrypt}) async {
-    final result = await _channel.invokeMethod<Uint8List>(
-      encrypt ? 'encrypt' : 'decrypt',
-      Uint8List.fromList(bytes),
-    );
-    if (result == null) {
-      throw StateError('Android credential encryption failed.');
-    }
-    return result;
-  }
 }
 
 Future<void> atomicWrite(File file, List<int> data) async {
