@@ -19,7 +19,11 @@ import 'fixtures/cover_data.dart';
 
 void main() {
   setUpAll(() async {
-    final font = File('C:/Windows/Fonts/segoeui.ttf');
+    final font = File(
+      Platform.isWindows
+          ? 'C:/Windows/Fonts/segoeui.ttf'
+          : '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+    );
     if (await font.exists()) {
       await (FontLoader('Segoe UI')
             ..addFont(font.readAsBytes().then((b) => ByteData.sublistView(b))))
