@@ -1132,7 +1132,7 @@ class _SyncedLyricsState extends State<_SyncedLyrics> {
               child: ListView.builder(
                 key: const ValueKey('synced-lyrics'),
                 controller: _scroll,
-                cacheExtent: 800,
+                scrollCacheExtent: 800,
                 padding: EdgeInsets.symmetric(vertical: box.maxHeight * .5),
                 itemCount: widget.lyrics.lines.length,
                 itemExtentBuilder: (index, _) => _heights[index],
