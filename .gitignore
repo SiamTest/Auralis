@@ -59,3 +59,14 @@ native/tdlib/
 .native-build/
 .ci-cache/
 dist/
+
+# Android signing, generated files and locally compiled TDLib
+android/.gradle/
+android/.kotlin/
+android/local.properties
+android/key.properties
+*.jks
+*.keystore
+android/app/src/main/jniLibs/
+android/app/src/main/java/io/flutter/plugins/
+native/android/
