@@ -6,7 +6,7 @@ Auralis now shares its Flutter UI and Telegram library/player features between A
 
 Commit the complete project, including the new `android/` folder, to your repository. Open **Actions → Android APK build**. It runs independently on pushes, pull requests and manual dispatch, with a manual architecture selector. Windows keeps `.github/workflows/windows.yml` and its existing compiled TDLib cache. Neither workflow depends on the other finishing.
 
-The Android workflow installs Java 17, Flutter 3.47.1, Android SDK 36 / build tools 36.0.0, NDK 28.2.13676358 and host build tools. It resolves the lockfile, runs analysis and tests, builds pinned TDLib/OpenSSL for the selected ABI, compiles an APK, verifies its signing and required native libraries, checks all native ELF load segments for 16 KiB alignment, and uploads the APK, SHA-256 checksums and native provenance as an Actions artifact. The initial TDLib build is substantial; later compatible runs reuse its ABI-specific cache. Tests and the final APK build always run, including on cache hits.
+The Android workflow installs Java 17, Flutter 3.47.1, Android SDK 36 / build tools 36.0.0, NDK 28.2.13676358 and host build tools. It resolves the lockfile, runs analysis and tests, builds pinned TDLib/OpenSSL for the selected ABI, compiles an ABI-split APK with `--split-per-abi`, verifies its signing and required native libraries, checks that the APK contains **only** the requested ABI, checks all native ELF load segments for 16 KiB alignment, and uploads the APK, SHA-256 checksums and native provenance as an Actions artifact. The initial TDLib build is substantial; later compatible runs reuse its ABI-specific cache. Tests and the final APK build always run, including on cache hits.
 
 Download **auralis-android-arm64-v8a-development** or **auralis-android-arm64-v8a-release** from the successful run's **Artifacts** area, extract it and install its APK on your phone. This workflow builds artifacts only. It does not publish a GitHub Release, replace Windows assets or upload to Google Play.
 
@@ -51,13 +51,13 @@ flutter analyze --no-pub --fatal-infos
 flutter test --no-pub --reporter expanded
 python3 -m unittest discover -s tool -p test_android_tools.py
 bash tool/build-tdlib-android.sh arm64-v8a
-flutter build apk --debug --target-platform android-arm64
-python3 tool/verify-android.py build/app/outputs/flutter-apk/app-debug.apk arm64-v8a
+flutter build apk --debug --split-per-abi --target-platform android-arm64
+python3 tool/verify-android.py build/app/outputs/flutter-apk/app-arm64-v8a-debug.apk arm64-v8a
 ```
 
 For a local release, create the ignored `android/key.properties` with `storeFile`, `storePassword`, `keyAlias` and `keyPassword`, using an absolute keystore path or a path relative to `android/`. Then build with `--release`. Keep the same application ID and signing key across upgrades, and increment `pubspec.yaml` for each app update.
 
-To test on a connected x86_64 emulator, build TDLib for x86_64 and use `--target-platform android-x64`. The native Android Keystore test can then run with `cd android && ./gradlew connectedDebugAndroidTest -Ptarget-platform=android-x64`. This is an actual device/emulator test; host bridge tests alone do not verify Android cryptography or hardware playback. See VERIFICATION.md for what was run for this delivery and THIRD_PARTY_NOTICES.md for native distribution limits.
+To test on a connected x86_64 emulator, build TDLib for x86_64 and use `--split-per-abi --target-platform android-x64`; the output is `app-x86_64-debug.apk`. The native Android Keystore test can then run with `cd android && ./gradlew connectedDebugAndroidTest -Ptarget-platform=android-x64`. This is an actual device/emulator test; host bridge tests alone do not verify Android cryptography or hardware playback. See VERIFICATION.md for what was run for this delivery and THIRD_PARTY_NOTICES.md for native distribution limits.
 
 
 ### CI SDK command-line setup
@@ -68,3 +68,18 @@ The Android workflow explicitly runs the commit-pinned android-actions/setup-and
 ### Flutter 3.47.1 / Gradle compatibility
 
 The Gradle wrapper pins 8.14.3 with the official distribution SHA-256. Flutter 3.47.1 enforces Gradle 8.14.0 or newer, so the previous 8.13 wrapper failed while applying the Flutter app plugin. AGP stays at 8.13.2, Kotlin at 2.2.20 and Java at 17. The existing android.newDsl=false and android.builtInKotlin=false settings remain; the generic AGP 9 migration hint was not the reported root failure. Dependency validation remains enabled. Android source verification now rejects Gradle below 8.14 before native/APK build work.
+
+
+### Single-architecture APK verification fix
+
+Flutter's `--target-platform android-arm64` flag selects the compiled Flutter target,
+but an APK built without ABI splitting can still package native libraries from
+other ABIs supplied by dependencies such as libmpv. That causes
+`tool/verify-android.py` to fail with `Unexpected ABI in the APK.` even after
+Gradle successfully completes `assembleDebug`. Always combine the chosen
+`--target-platform` with `--split-per-abi` and copy the ABI-specific output
+(`app-arm64-v8a-debug.apk` or `app-x86_64-debug.apk` for development builds).
+The existing strict native ELF, ABI, signing and ZIP alignment checks remain enabled.
+Flutter adds an ABI offset to the Android APK version code when splitting;
+release updates still require a consistent signing key and increasing version codes.
+This is a packaging/CI-only correction; the application version is unchanged.
