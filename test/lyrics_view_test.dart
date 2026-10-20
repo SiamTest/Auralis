@@ -52,7 +52,9 @@ PlayerController controller() =>
 
 Widget view(PlayerController player, LyricsRepository repository) =>
     MaterialApp(
-      theme: ThemeData.dark(),
+      theme: ThemeData.dark().copyWith(
+        textTheme: ThemeData.dark().textTheme.apply(fontFamily: 'Segoe UI'),
+      ),
       home: Scaffold(
         body: ListenableBuilder(
           listenable: player,
@@ -68,7 +70,11 @@ Widget view(PlayerController player, LyricsRepository repository) =>
 
 void main() {
   setUpAll(() async {
-    final font = File('C:/Windows/Fonts/segoeui.ttf');
+    final font = File(
+      Platform.isWindows
+          ? 'C:/Windows/Fonts/segoeui.ttf'
+          : '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+    );
     if (font.existsSync()) {
       await (FontLoader('Segoe UI')
             ..addFont(font.readAsBytes().then((b) => ByteData.sublistView(b))))
@@ -91,8 +97,15 @@ void main() {
       await player.audio.seek(const Duration(seconds: 160));
       await tester.pumpAndSettle();
       expect(find.text('Original test line 20'), findsOneWidget);
-      final active = tester.widget<Text>(find.text('Original test line 20'));
-      expect(active.style!.color, ThemeData.dark().colorScheme.primary);
+      final active = tester.widget<AnimatedDefaultTextStyle>(
+        find
+            .ancestor(
+              of: find.text('Original test line 20'),
+              matching: find.byType(AnimatedDefaultTextStyle),
+            )
+            .first,
+      );
+      expect(active.style.color, lyricsHighlight);
       await tester.tap(find.byKey(const ValueKey('lyric-21')));
       await tester.pumpAndSettle();
       expect(player.audio.position, const Duration(seconds: 168));
@@ -112,6 +125,105 @@ void main() {
         tester.widget<SelectableText>(find.byType(SelectableText)).data,
         contains('Original test line 31'),
       );
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'reference controls seek, toggle playback and center multiline lyrics',
+    (tester) async {
+      final player = controller();
+      final repository = LyricsRepository()
+        ..save(
+          song,
+          Lyrics.parse(
+            '[00:00]Opening words\n[00:08]A longer original test line that wraps across the narrow window\n[00:16]Another line\n[00:24]Last words',
+          ),
+        );
+      addTearDown(player.shutdown);
+      addTearDown(repository.close);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await player.audio.seek(const Duration(seconds: 8));
+      for (final size in [
+        const Size(360, 480),
+        const Size(390, 844),
+        const Size(1280, 800),
+      ]) {
+        tester.view.physicalSize = size;
+        await tester.pumpWidget(view(player, repository));
+        await tester.pumpAndSettle();
+        final viewport = tester.getRect(
+          find.byKey(const ValueKey('synced-lyrics')),
+        );
+        final line = tester.getRect(find.byKey(const ValueKey('lyric-1')));
+        expect(line.center.dy, closeTo(viewport.center.dy, 1), reason: '$size');
+        final activeFilter = tester.widget<ImageFiltered>(
+          find.descendant(
+            of: find.byKey(const ValueKey('lyric-1')),
+            matching: find.byType(ImageFiltered),
+          ),
+        );
+        expect(activeFilter.enabled, isFalse);
+        final neighborFilter = tester.widget<ImageFiltered>(
+          find.descendant(
+            of: find.byKey(const ValueKey('lyric-2')),
+            matching: find.byType(ImageFiltered),
+          ),
+        );
+        expect(neighborFilter.enabled, isTrue);
+        expect(tester.takeException(), isNull);
+      }
+      final play = find.byKey(const ValueKey('lyrics-play-pause'));
+      await tester.tap(play);
+      await tester.pumpAndSettle();
+      expect(player.audio.playing, isTrue);
+      await tester.tap(play);
+      await tester.pumpAndSettle();
+      expect(player.audio.playing, isFalse);
+      final slider = tester.widget<Slider>(
+        find.byKey(const ValueKey('playback-seek')),
+      );
+      slider.onChanged!(.5);
+      await tester.pumpAndSettle();
+      expect(player.audio.position, const Duration(seconds: 150));
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'lyrics remain usable with large text and system reduced motion',
+    (tester) async {
+      final player = controller()..settings.reducedMotion = false;
+      final repository = LyricsRepository()..save(song, Lyrics.parse(fixture));
+      addTearDown(player.shutdown);
+      addTearDown(repository.close);
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(360, 480);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      tester.platformDispatcher.textScaleFactorTestValue = 1.8;
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          FakeAccessibilityFeatures(disableAnimations: true);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      addTearDown(
+        tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
+      );
+      await tester.pumpWidget(view(player, repository));
+      await tester.pumpAndSettle();
+      await player.audio.seek(const Duration(seconds: 16));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('lyric-2')).hitTestable(),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('lyrics-play-pause')).hitTestable(),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+      expect(tester.binding.hasScheduledFrame, isFalse);
       await tester.pumpWidget(const SizedBox());
     },
   );
@@ -158,10 +270,10 @@ void main() {
           expect(find.text('Instrumental · no lyrics'), findsOneWidget);
         } else if (lyrics != null) {
           expect(find.byType(SelectableText), findsOneWidget);
-          final segment = tester.widget<SegmentedButton<bool>>(
-            find.byType(SegmentedButton<bool>),
+          final syncedButton = tester.widget<TextButton>(
+            find.byKey(const ValueKey('lyrics-synced-mode')),
           );
-          expect(segment.segments.first.enabled, isFalse);
+          expect(syncedButton.onPressed, isNull);
         } else {
           expect(find.text('No lyrics found for this song.'), findsOneWidget);
         }
@@ -208,6 +320,10 @@ void main() {
       await tester.tap(find.text('Lyrics').first);
       await tester.pumpAndSettle();
       expect(find.byType(LyricsView), findsOneWidget);
+      expect(find.byType(NavigationBar), findsNothing);
+      expect(find.byKey(const ValueKey('player-bar')), findsNothing);
+      expect(find.byKey(const ValueKey('lyrics-song-pill')), findsOneWidget);
+      expect(find.byKey(const ValueKey('playback-seek')), findsOneWidget);
       await tester.tap(find.text('Paste lyrics instead'));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField).last, fixture);
@@ -216,7 +332,11 @@ void main() {
       await tester.pumpAndSettle();
       await player.audio.seek(const Duration(seconds: 16));
       await tester.pumpAndSettle();
-      for (final size in [const Size(1280, 800), const Size(360, 480)]) {
+      for (final size in [
+        const Size(1280, 800),
+        const Size(360, 480),
+        const Size(390, 844),
+      ]) {
         tester.view.physicalSize = size;
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull, reason: '$size');
@@ -239,6 +359,8 @@ void main() {
       await tester.tap(find.byTooltip('Back to cover'));
       await tester.pumpAndSettle();
       expect(find.byType(LyricsView), findsNothing);
+      expect(find.byType(NavigationBar), findsOneWidget);
+      expect(find.byKey(const ValueKey('player-bar')), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     },
   );
