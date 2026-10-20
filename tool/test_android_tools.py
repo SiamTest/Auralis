@@ -67,6 +67,25 @@ class AndroidToolsTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 verify.verify_apk(apk, 'x86_64')
 
+    def test_github_workflow_builds_single_abi_split_apk(self):
+        workflow = (Path(__file__).resolve().parents[1] / '.github/workflows/android.yml').read_text()
+        self.assertIn('flutter build apk --"$mode" --no-pub --split-per-abi --target-platform "$target"', workflow)
+        self.assertIn('source_apk="build/app/outputs/flutter-apk/app-$ABI-$mode.apk"', workflow)
+        self.assertIn('cp "$source_apk" "dist/android/auralis-$version-android-$ABI-$mode.apk"', workflow)
+        self.assertNotIn('cp "build/app/outputs/flutter-apk/app-$mode.apk"', workflow)
+
+    def test_apk_rejects_any_extra_architecture_even_when_target_libraries_exist(self):
+        with tempfile.TemporaryDirectory() as temp:
+            apk = Path(temp) / 'mixed.apk'
+            with zipfile.ZipFile(apk, 'w') as archive:
+                for name in ('AndroidManifest.xml', 'classes.dex'):
+                    archive.writestr(name, b'fixture')
+                for lib in ('tdjson', 'mpv', 'mediakitandroidhelper', 'flutter'):
+                    archive.writestr(f'lib/arm64-v8a/lib{lib}.so', elf())
+                archive.writestr('lib/x86_64/libmpv.so', elf(machine=62))
+            with self.assertRaisesRegex(ValueError, 'Unexpected ABI'):
+                verify.verify_apk(apk, 'arm64-v8a')
+
     def test_signing_defaults_to_development_and_rejects_partial_secrets(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp)
