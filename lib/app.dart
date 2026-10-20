@@ -1507,9 +1507,6 @@ class _PlayerShellState extends State<PlayerShell> {
       child: LayoutBuilder(
         key: const ValueKey('now-playing-layout'),
         builder: (context, box) {
-          final reduced =
-              player.settings.reducedMotion ||
-              MediaQuery.disableAnimationsOf(context);
           final scale = MediaQuery.textScalerOf(context)
               .scale(1)
               .clamp(1.0, 2.0);
@@ -2362,7 +2359,7 @@ class _PlayerShellState extends State<PlayerShell> {
                   const Divider(),
                 ],
                 Text(
-                  'Auralis ${widget.updater?.currentVersion ?? '0.1.30'} · AGPL-3.0-or-later\nIndependent Flutter interface. Playback by libmpv. Telegram connectivity by TDLib.',
+                  'Auralis ${widget.updater?.currentVersion ?? '0.1.31'} · AGPL-3.0-or-later\nIndependent Flutter interface. Playback by libmpv. Telegram connectivity by TDLib.',
                   style: const TextStyle(
                     color: muted,
                     fontSize: 12,
@@ -2405,7 +2402,7 @@ class _PlayerShellState extends State<PlayerShell> {
             onPressed: () => showLicensePage(
               context: context,
               applicationName: 'Auralis',
-              applicationVersion: widget.updater?.currentVersion ?? '0.1.30',
+              applicationVersion: widget.updater?.currentVersion ?? '0.1.31',
             ),
             child: const Text('Licenses'),
           ),
