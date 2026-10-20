@@ -569,6 +569,121 @@ class _LyricsViewState extends State<LyricsView> {
     ),
   );
 
+  Widget _playback(bool short, bool reduced) {
+    final player = widget.player, audio = player.audio;
+    final duration = audio.duration.inMilliseconds;
+    final progress = duration <= 0
+        ? 0.0
+        : (audio.position.inMilliseconds / duration).clamp(0.0, 1.0);
+    final buffered = duration <= 0
+        ? 0.0
+        : (audio.buffered.inMilliseconds / duration).clamp(0.0, 1.0);
+    final size = short ? 48.0 : 72.0;
+    return Row(
+      children: [
+        SizedBox(
+          width: size,
+          height: size,
+          child: IconButton.filled(
+            key: const ValueKey('lyrics-play-pause'),
+            tooltip: audio.playing ? 'Pause' : 'Play',
+            style:
+                IconButton.styleFrom(
+                  backgroundColor: _lyricsPlay,
+                  foregroundColor: const Color(0xFF21182F),
+                  disabledBackgroundColor: _lyricsPlay.withValues(alpha: .35),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(
+                      audio.playing ? 20 : size / 2,
+                    ),
+                  ),
+                ).copyWith(
+                  animationDuration: Duration(milliseconds: reduced ? 0 : 220),
+                ),
+            onPressed: _track == null || player.loading
+                ? null
+                : () async {
+                    try {
+                      await audio.toggle();
+                    } catch (_) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Could not change playback.'),
+                          ),
+                        );
+                      }
+                    }
+                  },
+            icon: AnimatedSwitcher(
+              duration: Duration(milliseconds: reduced ? 0 : 180),
+              transitionBuilder: (child, animation) => ScaleTransition(
+                scale: animation,
+                child: FadeTransition(opacity: animation, child: child),
+              ),
+              child: player.loading || audio.buffering
+                  ? const SizedBox(
+                      key: ValueKey('lyrics-buffering'),
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Icon(
+                      audio.playing
+                          ? Icons.pause_rounded
+                          : Icons.play_arrow_rounded,
+                      key: ValueKey(audio.playing),
+                      size: short ? 28 : 36,
+                    ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: DecoratedBox(
+            key: const ValueKey('lyrics-seek-pill'),
+            decoration: BoxDecoration(
+              color: _lyricsSurface,
+              borderRadius: BorderRadius.circular(40),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: WaveSeekBar(
+                value: progress,
+                buffered: buffered,
+                playing: audio.playing && !audio.buffering && _track != null,
+                reducedMotion: reduced,
+                format: (value) => clockText(
+                  Duration(milliseconds: (value * duration).round()),
+                ),
+                onChanged: duration <= 0
+                    ? null
+                    : (value) async {
+                        try {
+                          await player.seek(
+                            Duration(milliseconds: (value * duration).round()),
+                          );
+                        } catch (_) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Could not seek to this position.',
+                                ),
+                              ),
+                            );
+                          }
+                        }
+                      },
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+
   Widget _transportDock({
     required bool short,
     required bool reduced,
