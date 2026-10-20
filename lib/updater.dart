@@ -311,6 +311,7 @@ class AppUpdater extends ChangeNotifier {
       return;
     }
     installing = true;
+    status = 'Starting the update installer…';
     error = null;
     _changed();
     Process? helper;
@@ -320,6 +321,11 @@ class AppUpdater extends ChangeNotifier {
           release.sha256) {
         downloaded = null;
         throw const FormatException('Installer changed after verification');
+      }
+      final ready = File('${installer.parent.path}/update-helper.ready');
+      final failure = File('${installer.parent.path}/update-error.txt');
+      for (final file in [ready, failure]) {
+        if (await file.exists()) await file.delete();
       }
       final script = File('${installer.parent.path}/install-update.ps1');
       await script.writeAsString(installerScript, flush: true);
@@ -342,24 +348,29 @@ class AppUpdater extends ChangeNotifier {
                 installer.path,
                 '-ExpectedHash',
                 release.sha256,
+                '-ReadyFile',
+                ready.path,
                 '-InstallDirectory',
                 File(Platform.resolvedExecutable).parent.path,
               ],
               mode: ProcessStartMode.detached,
             );
+      await waitForUpdateHelper(ready, failure, helper.pid);
+      status = 'Closing Auralis to install the update…';
+      _changed();
       closing = true;
       if (!await requestExit!()) {
         helper.kill();
         throw StateError('Application exit cancelled');
       }
-      status = 'Closing Auralis to install the update…';
     } catch (_) {
       helper?.kill();
+      status = 'Update installation could not start.';
       error = downloaded == null
           ? 'The installer changed after verification. Download the update again.'
           : closing
           ? 'Auralis could not finish closing for the update. Restart Auralis and retry, or close it and run the downloaded installer manually.'
-          : 'Could not start the installer helper. Close Auralis and run the downloaded installer manually.';
+          : 'Could not start the installer helper. Auralis has stayed open. Close it and run the downloaded installer manually. Download folder: ${installer.parent.path}';
     } finally {
       installing = false;
       _changed();
@@ -380,26 +391,59 @@ class AppUpdater extends ChangeNotifier {
   }
 }
 
+/// A detached process can start and then fail before loading the script.
+/// Require its acknowledgement before shutting down the running application.
+Future<void> waitForUpdateHelper(
+  File ready,
+  File failure,
+  int helperPid, {
+  Duration timeout = const Duration(seconds: 15),
+}) async {
+  final watch = Stopwatch()..start();
+  do {
+    if (await failure.exists()) throw StateError('Installer helper failed.');
+    if (await ready.exists() &&
+        (await ready.readAsString()).trim() == '$helperPid') {
+      return;
+    }
+    if (watch.elapsed >= timeout) break;
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+  } while (watch.elapsed < timeout);
+  throw TimeoutException('Installer helper did not become ready.');
+}
+
 // Wait for the framework's graceful audio/TDLib shutdown before touching installed files.
 const installerScript = r'''
 param(
   [Parameter(Mandatory=$true)][int]$AppProcessId,
   [Parameter(Mandatory=$true)][string]$Installer,
   [Parameter(Mandatory=$true)][string]$ExpectedHash,
+  [Parameter(Mandatory=$true)][string]$ReadyFile,
   [Parameter(Mandatory=$true)][string]$InstallDirectory
 )
 $ErrorActionPreference = 'Stop'
 try {
   $AppProcess = $null
   try { $AppProcess = [System.Diagnostics.Process]::GetProcessById($AppProcessId) } catch [System.ArgumentException] { }
+  [System.IO.File]::WriteAllText("$ReadyFile.tmp", [string]$PID)
+  [System.IO.File]::Move("$ReadyFile.tmp", $ReadyFile)
   if ($AppProcess -and -not $AppProcess.WaitForExit(90000)) { throw 'Auralis did not close; update cancelled.' }
   $Hash = [System.Security.Cryptography.SHA256]::Create()
   $Stream = [System.IO.File]::OpenRead($Installer)
   try { $ActualHash = [System.BitConverter]::ToString($Hash.ComputeHash($Stream)).Replace('-', '').ToLowerInvariant() }
   finally { $Stream.Dispose(); $Hash.Dispose() }
   if ($ActualHash -ne $ExpectedHash) { throw 'Installer checksum mismatch.' }
-  & $Installer '/SILENT' '/NORESTART' '/CLOSEAPPLICATIONS' '/AURALISUPDATE=1' "/DIR=$InstallDirectory"
-  if ($LASTEXITCODE -ne 0) { throw "Installer failed with exit code $LASTEXITCODE" }
+  $Log = [System.IO.Path]::Combine([System.IO.Path]::GetDirectoryName($Installer), 'installer.log')
+  $StartInfo = New-Object System.Diagnostics.ProcessStartInfo
+  $StartInfo.FileName = $Installer
+  $StartInfo.UseShellExecute = $false
+  $StartInfo.Arguments = '/SILENT /NORESTART /CLOSEAPPLICATIONS /AURALISUPDATE=1 /DIR="{0}" /LOG="{1}"' -f $InstallDirectory, $Log
+  $Setup = [System.Diagnostics.Process]::Start($StartInfo)
+  # Wait for the actual GUI installer and read its exit code, never $LASTEXITCODE.
+  $Setup.WaitForExit()
+  $Code = $Setup.ExitCode
+  $Setup.Dispose()
+  if ($Code -ne 0) { throw "Installer failed with exit code $Code. See installer.log." }
 } catch {
   [System.IO.File]::WriteAllText([System.IO.Path]::Combine([System.IO.Path]::GetDirectoryName($Installer), 'update-error.txt'), $_.Exception.Message)
   exit 1
