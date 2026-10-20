@@ -40,7 +40,7 @@ class TdTransport {
         final json = Map<String, dynamic>.from(event);
         if (json.containsKey('bridgeError')) {
           final error = StateError(
-            'TDLib could not load. Install native/tdjson.dll and its dependencies.',
+            'TDLib could not load. Reinstall the complete Auralis package for your device.',
           );
           if (!ready.isCompleted) ready.completeError(error);
           _failPending(error);
