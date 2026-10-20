@@ -189,6 +189,12 @@ void main() {
       final build = steps.singleWhere((s) => s['name'] == 'Build Android APK');
       expect(build['run'], contains('flutter build apk'));
       expect(build['run'], contains('android-arm64'));
+      // Third-party media libraries include multiple ABIs; only ship the
+      // split output matching the requested native TDLib architecture.
+      expect(build['run'], contains('--split-per-abi'));
+      expect(build['run'], contains('--target-platform "\$target"'));
+      expect(build['run'], contains('app-\$ABI-\$mode.apk'));
+      expect(build['run'], isNot(contains('app-\$mode.apk"')));
       expect(build['run'], contains('verify-android.py'));
       expect(build['run'], isNot(contains('publish-release')));
       final manifest = File('android/app/src/main/AndroidManifest.xml')
