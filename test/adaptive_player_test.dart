@@ -152,13 +152,25 @@ void main() {
             ..queue.add(
               Track(
                 id: 'current',
-                title: 'Evening waves',
+                title:
+                    'Evening waves — a longer track title for the fixed player',
                 artist: 'Auralis test artist',
                 source: 'Music channel',
                 coverPreview: art,
               ),
             )
             ..index = 0;
+      player.queue.addAll(
+        List.generate(
+          576,
+          (i) => Track(
+            id: 'next-$i',
+            title: 'Upcoming track $i',
+            artist: 'Another artist',
+            source: 'Music channel',
+          ),
+        ),
+      );
       addTearDown(() async {
         await player.shutdown();
         await telegram.shutdown();
@@ -180,6 +192,7 @@ void main() {
       });
       final sizes = [
         const Size(360, 480),
+        const Size(390, 844),
         const Size(520, 560),
         const Size(760, 650),
         const Size(900, 480),
@@ -232,6 +245,52 @@ void main() {
         );
         expect(audio.playing, isTrue);
         expect(tester.takeException(), isNull, reason: '$size Now Playing');
+        final layout = find.byKey(const ValueKey('now-playing-layout'));
+        expect(
+          find.descendant(of: layout, matching: find.byType(Scrollable)),
+          findsNothing,
+        );
+        expect(
+          find.byKey(const ValueKey('now-playing-actions')).hitTestable(),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey('now-playing-queue')).hitTestable(),
+          findsOneWidget,
+        );
+        final artPosition = tester.getRect(
+          find.byKey(const ValueKey('now-playing-artwork')),
+        );
+        await tester.dragFrom(
+          tester.getCenter(find.byKey(const ValueKey('now-playing-artwork'))),
+          const Offset(0, -300),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          tester.getRect(find.byKey(const ValueKey('now-playing-artwork'))),
+          artPosition,
+        );
+        if (size.width == 360 || size.width == 1920) {
+          await tester.runAsync(() async {
+            final render =
+                boundary.currentContext!.findRenderObject()!
+                    as RenderRepaintBoundary;
+            final image = await render.toImage();
+            final bytes = await image.toByteData(
+              format: ui.ImageByteFormat.png,
+            );
+            await File('docs/screenshots/now-playing-${size.width.toInt()}.png')
+                .writeAsBytes(bytes!.buffer.asUint8List());
+            image.dispose();
+          });
+        }
+        await tester.tap(find.byKey(const ValueKey('now-playing-queue')));
+        await tester.pumpAndSettle();
+        expect(
+          tester.widget<Text>(find.byKey(const ValueKey('page-title'))).data,
+          'Play queue',
+        );
+
         await tester.tap(find.byTooltip('Library').first);
         await tester.pumpAndSettle();
         await tester.tap(find.byTooltip('Settings').first);
@@ -273,6 +332,17 @@ void main() {
       addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull, reason: '130% text');
+      await tester.tap(find.byTooltip('Now playing').first);
+      await tester.pumpAndSettle();
+      expect(
+        tester.takeException(),
+        isNull,
+        reason: 'Now Playing at 130% text',
+      );
+      expect(
+        find.byKey(const ValueKey('now-playing-queue')).hitTestable(),
+        findsOneWidget,
+      );
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
