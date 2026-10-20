@@ -247,6 +247,27 @@ void main() {
         expect(audio.playing, isTrue);
         expect(tester.takeException(), isNull, reason: '$size Now Playing');
         final layout = find.byKey(const ValueKey('now-playing-layout'));
+        final pageBounds = tester.getRect(layout).inflate(.1);
+        final actions = find.byKey(const ValueKey('now-playing-actions'));
+        final buttons = find.descendant(
+          of: actions,
+          matching: find.byWidgetPredicate(
+            (widget) => widget is IconButton || widget is FilledButton,
+          ),
+        );
+        expect(buttons, findsNWidgets(5), reason: '$size keeps every action');
+        for (final target in [
+          find.byKey(const ValueKey('now-playing-artwork')),
+          for (final button in buttons.evaluate()) find.byWidget(button.widget),
+        ]) {
+          final bounds = tester.getRect(target);
+          expect(
+            pageBounds.contains(bounds.topLeft) &&
+                pageBounds.contains(bounds.bottomRight),
+            isTrue,
+            reason: '$size keeps artwork and action buttons inside the page',
+          );
+        }
         expect(
           find.descendant(of: layout, matching: find.byType(Scrollable)),
           findsNothing,
