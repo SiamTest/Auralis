@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '../models.dart';
+import '../lyrics.dart';
 import '../storage.dart';
 import 'td_transport.dart';
 import 'embedded_cover.dart';
@@ -91,62 +92,10 @@ class TelegramService extends ChangeNotifier {
         }
       }
       if (result == null && track.size > 0 && active()) {
-        final deadline = DateTime.now().add(const Duration(seconds: 20));
-        Future<Json> metadataRequest(Json request) {
-          final remaining = deadline.difference(DateTime.now());
-          if (!active() || remaining <= Duration.zero) {
-            throw TimeoutException('Artwork timed out');
-          }
-          return transport.request(
-            request,
-            timeout: remaining > const Duration(seconds: 12)
-                ? const Duration(seconds: 12)
-                : remaining,
-          );
-        }
-
-        result = await readEmbeddedCover((offset, count) async {
-          if (!active()) return null;
-          var prefix = await metadataRequest({
-            '@type': 'getFileDownloadedPrefixSize',
-            'file_id': id,
-            'offset': offset,
-          });
-          if (!active()) return null;
-          if ((prefix['size'] as num? ?? 0) < count) {
-            // TDLib has one download offset per file; never move a playing stream.
-            if (isStreaming(id)) return null;
-            await metadataRequest({
-              '@type': 'downloadFile',
-              'file_id': id,
-              'priority': 1,
-              'offset': offset,
-              'limit': count,
-              'synchronous': true,
-            });
-            if (!active()) return null;
-            prefix = await metadataRequest({
-              '@type': 'getFileDownloadedPrefixSize',
-              'file_id': id,
-              'offset': offset,
-            });
-            if ((prefix['size'] as num? ?? 0) < count) return null;
-          }
-          final bytes = BytesBuilder(copy: false);
-          while (bytes.length < count && active()) {
-            final length = min(128 * 1024, count - bytes.length);
-            final part = await metadataRequest({
-              '@type': 'readFilePart',
-              'file_id': id,
-              'offset': offset + bytes.length,
-              'count': length,
-            });
-            final data = base64Decode(part['data'] as String);
-            if (data.length != length) return null;
-            bytes.add(data);
-          }
-          return active() ? bytes.takeBytes() : null;
-        }, track.size);
+        result = await readEmbeddedCover(
+          _metadataSource(id, generation),
+          track.size,
+        );
       }
       return active() ? result : null;
     } catch (_) {
@@ -166,6 +115,82 @@ class TelegramService extends ChangeNotifier {
       scheduleMicrotask(() {
         if (ready) notifyListeners();
       });
+    }
+  }
+
+  CoverRange _metadataSource(int id, int generation) {
+    bool active() => ready && generation == _imageGeneration;
+    final deadline = DateTime.now().add(const Duration(seconds: 20));
+    Future<Json> metadataRequest(Json request) {
+      final remaining = deadline.difference(DateTime.now());
+      if (!active() || remaining <= Duration.zero) {
+        throw TimeoutException('Metadata timed out');
+      }
+      return transport.request(
+        request,
+        timeout: remaining > const Duration(seconds: 12)
+            ? const Duration(seconds: 12)
+            : remaining,
+      );
+    }
+
+    return (offset, count) async {
+      if (!active()) return null;
+      var prefix = await metadataRequest({
+        '@type': 'getFileDownloadedPrefixSize',
+        'file_id': id,
+        'offset': offset,
+      });
+      if (!active()) return null;
+      if ((prefix['size'] as num? ?? 0) < count) {
+        // TDLib has one download offset per file; never move a playing stream.
+        if (isStreaming(id)) return null;
+        await metadataRequest({
+          '@type': 'downloadFile',
+          'file_id': id,
+          'priority': 1,
+          'offset': offset,
+          'limit': count,
+          'synchronous': true,
+        });
+        if (!active()) return null;
+        prefix = await metadataRequest({
+          '@type': 'getFileDownloadedPrefixSize',
+          'file_id': id,
+          'offset': offset,
+        });
+        if ((prefix['size'] as num? ?? 0) < count) return null;
+      }
+      final bytes = BytesBuilder(copy: false);
+      while (bytes.length < count && active()) {
+        final length = min(128 * 1024, count - bytes.length);
+        final part = await metadataRequest({
+          '@type': 'readFilePart',
+          'file_id': id,
+          'offset': offset + bytes.length,
+          'count': length,
+        });
+        final data = base64Decode(part['data'] as String);
+        if (data.length != length) return null;
+        bytes.add(data);
+      }
+      return active() ? bytes.takeBytes() : null;
+    };
+  }
+
+  Future<Lyrics?> embeddedLyrics(Track track) async {
+    final id = track.fileId, generation = _imageGeneration;
+    if (!ready || id == null || track.size <= 0) return null;
+    try {
+      final text = await readEmbeddedLyrics(
+        _metadataSource(id, generation),
+        track.size,
+      );
+      if (text == null || !ready || generation != _imageGeneration) return null;
+      final lyrics = Lyrics.parse(text, embedded: true);
+      return lyrics.plain.isEmpty && lyrics.lines.isEmpty ? null : lyrics;
+    } catch (_) {
+      return null;
     }
   }
 
@@ -235,11 +260,13 @@ class TelegramService extends ChangeNotifier {
         _parametersSent = false;
       }
       _subscription = transport.updates.listen(_onUpdate);
-      final native = p.join(
-        p.dirname(Platform.resolvedExecutable),
-        'native',
-        'tdjson.dll',
-      );
+      final native = Platform.isAndroid
+          ? 'libtdjson.so'
+          : p.join(
+              p.dirname(Platform.resolvedExecutable),
+              'native',
+              'tdjson.dll',
+            );
       await transport.start(native);
       state = 'connecting';
       final auth = await transport.request({'@type': 'getAuthorizationState'});
@@ -347,9 +374,11 @@ class TelegramService extends ChangeNotifier {
           'api_id': _secrets['apiId'],
           'api_hash': _secrets['apiHash'],
           'system_language_code': 'en',
-          'device_model': 'Auralis Windows x64',
-          'system_version': 'Windows',
-          'application_version': '0.1.16',
+          'device_model': Platform.isAndroid
+              ? 'Auralis Android'
+              : 'Auralis Windows x64',
+          'system_version': Platform.operatingSystem,
+          'application_version': '0.1.20',
         });
       } catch (_) {
         _parametersSent = false;
@@ -486,7 +515,7 @@ class TelegramService extends ChangeNotifier {
           ? 'Telegram rejected the request (${e.code}). Check the value and try again; Telegram may require a wait.'
           : e is StateError
           ? e.message.toString()
-          : 'Could not connect. Check native/tdjson.dll, credentials, and network.';
+          : 'Could not connect. Check the installed native libraries, credentials, and network.';
     } finally {
       busy = false;
       notifyListeners();
