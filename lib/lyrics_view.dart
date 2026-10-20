@@ -243,42 +243,92 @@ class _LyricsViewState extends State<LyricsView> {
     ),
   );
 
-  Widget _options({bool vertical = false}) => PopupMenuButton<String>(
-    tooltip: 'Lyrics options',
-    icon: Icon(vertical ? Icons.more_vert_rounded : Icons.more_horiz_rounded),
-    onSelected: (value) {
-      if (value == 'import') {
-        unawaited(_import());
-      } else if (value == 'embedded') {
-        setState(() => unawaited(_embedded()));
-      } else {
-        unawaited(value == 'paste' ? _paste() : _find());
-      }
-    },
-    itemBuilder: (_) => [
-      PopupMenuItem(
-        value: 'import',
-        enabled: _track != null && !_importing,
-        child: const Text('Import .lrc file'),
-      ),
-      if (widget.loadEmbedded != null)
-        PopupMenuItem(
-          value: 'embedded',
-          enabled: _track != null && !_loading,
-          child: const Text('Read lyrics from music file'),
-        ),
-      PopupMenuItem(
-        value: 'find',
-        enabled: _track != null && !_loading,
-        child: const Text('Find lyrics on LRCLIB'),
-      ),
-      PopupMenuItem(
-        value: 'paste',
-        enabled: _track != null,
-        child: const Text('Paste lyrics'),
-      ),
-    ],
+  PopupMenuItem<String> _menuAction({
+    required String value,
+    required bool enabled,
+    required IconData icon,
+    required String title,
+    required String subtitle,
+  }) => PopupMenuItem<String>(
+    value: value,
+    enabled: enabled,
+    height: 64,
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+    child: _LyricsMenuEntry(
+      icon: icon,
+      title: title,
+      subtitle: subtitle,
+      enabled: enabled,
+    ),
   );
+
+  Widget _options({bool vertical = false}) {
+    final theme = Theme.of(context);
+    return Theme(
+      data: theme.copyWith(
+        popupMenuTheme: PopupMenuThemeData(
+          color: const Color(0xFF211E28),
+          surfaceTintColor: Colors.transparent,
+          shadowColor: Colors.black.withValues(alpha: .42),
+          elevation: 16,
+          menuPadding: const EdgeInsets.all(8),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+            side: const BorderSide(color: Color(0xFF312C3B)),
+          ),
+        ),
+      ),
+      child: PopupMenuButton<String>(
+        tooltip: 'Lyrics options',
+        position: PopupMenuPosition.under,
+        constraints: const BoxConstraints(minWidth: 280, maxWidth: 300),
+        offset: Offset(vertical ? -6 : 0, vertical ? -10 : 10),
+        icon: Icon(
+          vertical ? Icons.more_vert_rounded : Icons.more_horiz_rounded,
+        ),
+        onSelected: (value) {
+          if (value == 'import') {
+            unawaited(_import());
+          } else if (value == 'embedded') {
+            setState(() => unawaited(_embedded()));
+          } else {
+            unawaited(value == 'paste' ? _paste() : _find());
+          }
+        },
+        itemBuilder: (_) => [
+          _menuAction(
+            value: 'import',
+            enabled: _track != null && !_importing,
+            icon: Icons.file_open_rounded,
+            title: 'Import .lrc file',
+            subtitle: 'Use a local synced-lyrics file.',
+          ),
+          if (widget.loadEmbedded != null)
+            _menuAction(
+              value: 'embedded',
+              enabled: _track != null && !_loading,
+              icon: Icons.music_note_rounded,
+              title: 'Read from music file',
+              subtitle: 'Try embedded lyrics from this track.',
+            ),
+          _menuAction(
+            value: 'find',
+            enabled: _track != null && !_loading,
+            icon: Icons.search_rounded,
+            title: 'Find lyrics on LRCLIB',
+            subtitle: 'Search online using song details.',
+          ),
+          _menuAction(
+            value: 'paste',
+            enabled: _track != null,
+            icon: Icons.content_paste_rounded,
+            title: 'Paste lyrics',
+            subtitle: 'Enter plain text or timestamped LRC.',
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _body() {
     final lyrics = _lyrics;
@@ -648,6 +698,84 @@ class _LyricsViewState extends State<LyricsView> {
             );
           },
         ),
+      ),
+    );
+  }
+}
+
+
+class _LyricsMenuEntry extends StatelessWidget {
+  const _LyricsMenuEntry({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.enabled,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final foreground = enabled
+        ? const Color(0xFFF0EBFF)
+        : const Color(0xFF7B748A);
+    final secondary = enabled
+        ? const Color(0xFFB8B1C8)
+        : const Color(0xFF676170);
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: enabled
+                  ? lyricsHighlight.withValues(alpha: .14)
+                  : Colors.white.withValues(alpha: .05),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(icon, color: foreground, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: foreground,
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w700,
+                    height: 1.15,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  subtitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: secondary,
+                    fontSize: 12.2,
+                    fontWeight: FontWeight.w500,
+                    height: 1.2,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
