@@ -62,4 +62,9 @@ To test on a connected x86_64 emulator, build TDLib for x86_64 and use `--target
 
 ### CI SDK command-line setup
 
-The Android workflow explicitly runs the commit-pinned android-actions/setup-android action after Java setup and before invoking sdkmanager. This provisions the command-line tools, accepts SDK licenses and adds sdkmanager to PATH; the following step installs the pinned Android 36/build tools/NDK packages. The apt-get output in the reported failure was successful; exit 127 came from the missing sdkmanager command. This is a CI-only correction; the source version stays 0.1.21+22. Commit the complete corrected source and run the Android APK build workflow on that commit; rerunning the previous commit uses its old workflow.
+The Android workflow explicitly runs the commit-pinned android-actions/setup-android action after Java setup and before invoking sdkmanager. This provisions the command-line tools, accepts SDK licenses and adds sdkmanager to PATH; the following step installs the pinned Android 36/build tools/NDK packages. The apt-get output in the reported failure was successful; exit 127 came from the missing sdkmanager command. That SDK setup correction did not require an app version bump; see pubspec.yaml for the current app version. Commit the complete corrected source and run the Android APK build workflow on that commit; rerunning the previous commit uses its old workflow.
+
+
+### Flutter 3.47.1 / Gradle compatibility
+
+The Gradle wrapper pins 8.14.3 with the official distribution SHA-256. Flutter 3.47.1 enforces Gradle 8.14.0 or newer, so the previous 8.13 wrapper failed while applying the Flutter app plugin. AGP stays at 8.13.2, Kotlin at 2.2.20 and Java at 17. The existing android.newDsl=false and android.builtInKotlin=false settings remain; the generic AGP 9 migration hint was not the reported root failure. Dependency validation remains enabled. Android source verification now rejects Gradle below 8.14 before native/APK build work.
