@@ -168,6 +168,71 @@ void main() {
     expect(await service.image(2), isNull);
   });
 
+  test(
+    'embedded lyrics reuse cached stream ranges and discard sign-out results',
+    () async {
+      final payload = [
+        3,
+        ...'eng'.codeUnits,
+        0,
+        ...utf8.encode('[00:01]Original file words'),
+      ];
+      final frame = [
+        ...'USLT'.codeUnits,
+        ...number(payload.length, 4),
+        0,
+        0,
+        ...payload,
+      ];
+      final bytes = [
+        ...'ID3'.codeUnits,
+        3,
+        0,
+        0,
+        ...number(frame.length, 4, sync: true),
+        ...frame,
+      ];
+      final track = Track(
+        id: 'lyrics',
+        title: 'Song',
+        artist: 'Artist',
+        source: 'Channel',
+        fileId: 7,
+        size: bytes.length,
+      );
+      service.isStreaming = (_) => true;
+      td.onRequest = (r) async {
+        final offset = r['offset'] as int? ?? 0;
+        if (r['@type'] == 'getFileDownloadedPrefixSize') {
+          return {'size': bytes.length - offset};
+        }
+        if (r['@type'] == 'readFilePart') {
+          return {
+            'data': base64Encode(
+              bytes.sublist(offset, offset + (r['count'] as int)),
+            ),
+          };
+        }
+        return null;
+      };
+      final result = await service.embeddedLyrics(track);
+      expect(result!.embedded, isTrue);
+      expect(result.lines.single.text, 'Original file words');
+      expect(td.requests.where((r) => r['@type'] == 'downloadFile'), isEmpty);
+      td.onRequest = (r) async {
+        if (r['@type'] == 'readFilePart') {
+          service.clearImageCache();
+          return {'data': base64Encode(bytes.sublist(0, r['count'] as int))};
+        }
+        return {'size': bytes.length};
+      };
+      expect(await service.embeddedLyrics(track), isNull);
+      td.onRequest = (_) async => {'size': 0};
+      expect(await service.embeddedLyrics(track), isNull);
+      expect(td.requests.where((r) => r['@type'] == 'downloadFile'), isEmpty);
+    },
+  );
+
   test('embedded cover downloads only bounded metadata ranges', () async {
     final ranges = <int, int>{};
     td.onRequest = (r) async {
