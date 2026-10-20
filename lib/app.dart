@@ -1507,67 +1507,428 @@ class _PlayerShellState extends State<PlayerShell> {
       child: LayoutBuilder(
         key: const ValueKey('now-playing-layout'),
         builder: (context, box) {
+          final reduced =
+              player.settings.reducedMotion ||
+              MediaQuery.disableAnimationsOf(context);
           final scale = MediaQuery.textScalerOf(context)
               .scale(1)
               .clamp(1.0, 2.0);
           final rowHeight = 54.0 * scale;
           final upcoming = math.max(0, player.queue.length - player.index - 1);
-          final previewCount =
-              ((box.maxHeight - (compact ? 264 : 240) * scale) / rowHeight)
-                  .floor()
-                  .clamp(0, math.min(3, upcoming));
-          // Reserve queue rows first, then fit the cover/details to what remains.
-          final horizontal =
-              box.maxHeight - previewCount * rowHeight <
-              (box.maxWidth < 500 ? 300 : 420) * scale;
-          final cover = Artwork(
-            key: const ValueKey('now-playing-artwork'),
-            seed: track?.title ?? 'Auralis',
-            telegram: telegram,
-            track: track,
+          final wide = box.maxWidth >= (compact ? 340 : 900);
+          final narrow = box.maxWidth < 560;
+          final reserved = compact
+              ? 250.0
+              : wide
+              ? 330.0
+              : narrow
+              ? 410.0
+              : 430.0;
+          final previewCount = ((box.maxHeight - reserved) / rowHeight)
+              .floor()
+              .clamp(0, math.min(wide ? 3 : 2, upcoming));
+          final mime = track?.mime.split('/').last.toUpperCase() ?? 'AUDIO';
+          final duration = track?.duration ?? Duration.zero;
+          final detailPill = [
+            if (track?.source case final String source when source.isNotEmpty) source,
+            if (duration > Duration.zero) clockText(duration),
+            mime,
+          ].join(' • ');
+
+          Widget panel({
+            required Widget child,
+            EdgeInsetsGeometry padding = const EdgeInsets.all(16),
+            double radius = 28,
+            Color color = surface,
+          }) => Container(
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(radius),
+              border: Border.all(color: const Color(0xFF312C3A)),
+            ),
+            padding: padding,
+            child: child,
           );
-          final metadata = Column(
+
+          Widget tonalAction({
+            required IconData icon,
+            required String label,
+            required VoidCallback? onPressed,
+            Key? key,
+          }) => FilledButton.tonalIcon(
+            key: key,
+            onPressed: onPressed,
+            icon: Icon(icon, size: 18),
+            label: Text(label),
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(18),
+              ),
+            ),
+          );
+
+          Widget iconTrayButton({
+            required IconData icon,
+            required String tooltip,
+            required VoidCallback? onPressed,
+            Color? fg,
+          }) => Material(
+            color: const Color(0xFF17141D),
+            borderRadius: BorderRadius.circular(22),
+            child: IconButton(
+              tooltip: tooltip,
+              onPressed: onPressed,
+              icon: Icon(icon, color: fg ?? const Color(0xFFEAE5F3)),
+            ),
+          );
+
+          final cover = ClipRRect(
+            borderRadius: BorderRadius.circular(compact ? 26 : 34),
+            child: Artwork(
+              key: const ValueKey('now-playing-artwork'),
+              seed: track?.title ?? 'Auralis',
+              telegram: telegram,
+              track: track,
+            ),
+          );
+
+          final heroArtwork = AspectRatio(
+            aspectRatio: 1,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(compact ? 26 : 34),
+                boxShadow: [
+                  BoxShadow(
+                    color: accent.withValues(alpha: .08),
+                    blurRadius: 28,
+                    spreadRadius: 2,
+                  ),
+                ],
+              ),
+              child: cover,
+            ),
+          );
+
+          final titleBlock = Column(
+            crossAxisAlignment: compact || wide
+                ? CrossAxisAlignment.start
+                : CrossAxisAlignment.center,
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
                 track?.title ?? 'Find your next favorite',
                 key: const ValueKey('now-playing-title'),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
+                textAlign: compact || wide ? TextAlign.left : TextAlign.center,
                 style: TextStyle(
-                  fontSize: compact || horizontal ? 18 : 26,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: -.6,
+                  fontSize: compact ? 18 : narrow ? 22 : 28,
+                  fontWeight: FontWeight.w800,
+                  height: 1.05,
+                  letterSpacing: -.8,
                 ),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 8),
               Text(
                 track?.artist ?? 'A space for the music you love',
-                maxLines: 1,
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: muted, fontSize: 12),
+                textAlign: compact || wide ? TextAlign.left : TextAlign.center,
+                style: TextStyle(
+                  color: const Color(0xFFD2CDDD),
+                  fontSize: compact ? 13 : 16,
+                  fontWeight: FontWeight.w500,
+                  height: 1.2,
+                ),
               ),
-              const SizedBox(height: 6),
-              Center(
-                child: Chip(
-                  visualDensity: horizontal
-                      ? VisualDensity.compact
-                      : VisualDensity.standard,
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  avatar: const Icon(Icons.send_rounded, size: 14),
-                  label: Text(
-                    track?.source ?? 'Nothing playing',
+              const SizedBox(height: 12),
+              Align(
+                alignment: compact || wide
+                    ? Alignment.centerLeft
+                    : Alignment.center,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF17141D),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: const Color(0xFF2B2634)),
+                  ),
+                  child: Text(
+                    detailPill,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 10),
+                    style: const TextStyle(
+                      color: Color(0xFFB8B1C8),
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ),
             ],
           );
+
+          final actions = Wrap(
+            key: const ValueKey('now-playing-actions'),
+            alignment: wide || compact
+                ? WrapAlignment.start
+                : WrapAlignment.center,
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              tonalAction(
+                icon: Icons.lyrics_rounded,
+                label: 'Lyrics',
+                onPressed: track == null
+                    ? null
+                    : () => setState(() {
+                        destination = 3;
+                        showLyrics = true;
+                        search.clear();
+                      }),
+              ),
+              tonalAction(
+                key: const ValueKey('now-playing-queue'),
+                icon: Icons.queue_music_rounded,
+                label: 'Queue',
+                onPressed: () => setState(() {
+                  destination = 2;
+                  showLyrics = false;
+                  search.clear();
+                }),
+              ),
+              tonalAction(
+                icon: player.settings.favoriteIds.contains(track?.id)
+                    ? Icons.favorite_rounded
+                    : Icons.favorite_border_rounded,
+                label: player.settings.favoriteIds.contains(track?.id)
+                    ? 'Favorite'
+                    : 'Add to favorites',
+                onPressed: track == null
+                    ? null
+                    : () async {
+                        try {
+                          await player.toggleFavorite(track);
+                        } on StateError catch (e) {
+                          _notice(e.message);
+                        }
+                      },
+              ),
+              tonalAction(
+                icon: Icons.playlist_add_rounded,
+                label: 'Add to playlist',
+                onPressed: track == null ? null : () => _choosePlaylist(track),
+              ),
+              tonalAction(
+                icon: player.sleepActive
+                    ? Icons.bedtime_rounded
+                    : Icons.bedtime_outlined,
+                label: 'Sleep timer',
+                onPressed: _sleepTimer,
+              ),
+            ],
+          );
+
+          final utilityTray = Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              iconTrayButton(
+                icon: player.repeatMode == PlaybackRepeat.one
+                    ? Icons.repeat_one_rounded
+                    : Icons.repeat_rounded,
+                tooltip: switch (player.repeatMode) {
+                  PlaybackRepeat.off => 'Repeat: off',
+                  PlaybackRepeat.all => 'Repeat: queue',
+                  PlaybackRepeat.one => 'Repeat: one track',
+                },
+                onPressed: player.toggleRepeat,
+                fg: player.repeat ? accent : null,
+              ),
+              const SizedBox(width: 10),
+              iconTrayButton(
+                icon: Icons.playlist_play_rounded,
+                tooltip: 'Open queue',
+                onPressed: () => setState(() {
+                  destination = 2;
+                  showLyrics = false;
+                  search.clear();
+                }),
+              ),
+              const SizedBox(width: 10),
+              iconTrayButton(
+                icon: player.settings.favoriteIds.contains(track?.id)
+                    ? Icons.favorite_rounded
+                    : Icons.favorite_border_rounded,
+                tooltip: player.settings.favoriteIds.contains(track?.id)
+                    ? 'Remove from favorites'
+                    : 'Add to favorites',
+                onPressed: track == null
+                    ? null
+                    : () async {
+                        try {
+                          await player.toggleFavorite(track);
+                        } on StateError catch (e) {
+                          _notice(e.message);
+                        }
+                      },
+                fg: player.settings.favoriteIds.contains(track?.id)
+                    ? accent
+                    : null,
+              ),
+            ],
+          );
+
+          final heroPanel = panel(
+            padding: EdgeInsets.all(compact ? 14 : 18),
+            radius: compact ? 28 : 34,
+            child: LayoutBuilder(
+              builder: (context, heroBox) {
+                final artSize = wide
+                    ? math.min(heroBox.maxHeight - 8, 340.0)
+                    : math.min(
+                        compact ? 180.0 : (narrow ? 260.0 : 320.0),
+                        heroBox.maxHeight * (compact ? .36 : .48),
+                      ).clamp(120.0, 340.0);
+                return wide
+                    ? Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          SizedBox.square(
+                            dimension: artSize,
+                            child: heroArtwork,
+                          ),
+                          const SizedBox(width: 18),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                titleBlock,
+                                const SizedBox(height: 18),
+                                actions,
+                                const SizedBox(height: 18),
+                                utilityTray,
+                              ],
+                            ),
+                          ),
+                        ],
+                      )
+                    : Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox.square(
+                            dimension: artSize,
+                            child: heroArtwork,
+                          ),
+                          SizedBox(height: compact ? 12 : 16),
+                          Flexible(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                titleBlock,
+                                SizedBox(height: compact ? 12 : 16),
+                                actions,
+                                SizedBox(height: compact ? 12 : 16),
+                                utilityTray,
+                              ],
+                            ),
+                          ),
+                        ],
+                      );
+              },
+            ),
+          );
+
+          final queueHeader = Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '${previewCount == 0 ? 'QUEUE' : 'UP NEXT'} · $upcoming tracks',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: muted,
+                    fontSize: 11,
+                    letterSpacing: 1.0,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: () => setState(() {
+                  destination = 2;
+                  showLyrics = false;
+                  search.clear();
+                }),
+                icon: const Icon(Icons.queue_music_rounded, size: 18),
+                label: const Text('Open queue'),
+              ),
+            ],
+          );
+
+          final queuePanel = previewCount == 0
+              ? const SizedBox.shrink()
+              : panel(
+                  radius: 26,
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                  color: const Color(0xFF17141D),
+                  child: Column(
+                    children: [
+                      queueHeader,
+                      const SizedBox(height: 4),
+                      for (var offset = 0; offset < previewCount; offset++)
+                        SizedBox(
+                          key: ValueKey('now-playing-next-$offset'),
+                          height: rowHeight,
+                          child: ListTile(
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            leading: Container(
+                              width: 34,
+                              height: 34,
+                              decoration: BoxDecoration(
+                                color: accent.withValues(alpha: .1),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Icon(
+                                Icons.music_note_rounded,
+                                size: 18,
+                                color: accent,
+                              ),
+                            ),
+                            title: Text(
+                              player.queue[player.index + 1 + offset].title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 12.5),
+                            ),
+                            subtitle: Text(
+                              player.queue[player.index + 1 + offset].artist,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 10.5,
+                                color: muted,
+                              ),
+                            ),
+                            trailing: const Icon(
+                              Icons.play_arrow_rounded,
+                              color: muted,
+                              size: 18,
+                            ),
+                            onTap: () => player.playAt(player.index + 1 + offset),
+                          ),
+                        ),
+                    ],
+                  ),
+                );
+
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -1580,168 +1941,13 @@ class _PlayerShellState extends State<PlayerShell> {
                     letterSpacing: 1.8,
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 10),
               ],
-              Expanded(
-                child: horizontal
-                    ? LayoutBuilder(
-                        builder: (context, hero) {
-                          final size = math.min(
-                            hero.maxHeight,
-                            math.min(box.maxWidth * .32, 160.0),
-                          );
-                          return Row(
-                            children: [
-                              SizedBox.square(dimension: size, child: cover),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Center(
-                                  child: FittedBox(
-                                    fit: BoxFit.scaleDown,
-                                    child: SizedBox(
-                                      width: math.max(
-                                        0,
-                                        box.maxWidth - size - 12,
-                                      ),
-                                      child: metadata,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          );
-                        },
-                      )
-                    : Column(
-                        children: [
-                          Expanded(
-                            child: Center(
-                              child: ConstrainedBox(
-                                constraints: BoxConstraints(
-                                  maxWidth: compact ? 260 : 460,
-                                ),
-                                child: AspectRatio(
-                                  aspectRatio: 1,
-                                  child: cover,
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          metadata,
-                        ],
-                      ),
-              ),
-              const SizedBox(height: 6),
-              SizedBox(
-                height: 48,
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: IconButtonTheme(
-                    data: IconButtonThemeData(
-                      style: IconButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                      ),
-                    ),
-                    child: Row(
-                      key: const ValueKey('now-playing-actions'),
-                      mainAxisSize: MainAxisSize.min,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        if (track != null)
-                          IconButton(
-                            tooltip:
-                                player.settings.favoriteIds.contains(track.id)
-                                ? 'Remove from favorites'
-                                : 'Add to favorites',
-                            onPressed: () async {
-                              try {
-                                await player.toggleFavorite(track);
-                              } on StateError catch (e) {
-                                _notice(e.message);
-                              }
-                            },
-                            icon: Icon(
-                              player.settings.favoriteIds.contains(track.id)
-                                  ? Icons.favorite_rounded
-                                  : Icons.favorite_border_rounded,
-                              color: accent,
-                            ),
-                          ),
-                        TextButton.icon(
-                          onPressed: track == null
-                              ? null
-                              : () => setState(() {
-                                  destination = 3;
-                                  showLyrics = true;
-                                  search.clear();
-                                }),
-                          icon: const Icon(Icons.lyrics_rounded, size: 18),
-                          label: const Text('Lyrics'),
-                        ),
-                        IconButton(
-                          tooltip: 'Add to playlist',
-                          onPressed: track == null
-                              ? null
-                              : () => _choosePlaylist(track),
-                          icon: const Icon(Icons.playlist_add_rounded),
-                        ),
-                        _sleepControl(),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              const Divider(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      '${previewCount == 0 ? 'QUEUE' : 'UP NEXT'} · $upcoming tracks',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: muted, fontSize: 10),
-                    ),
-                  ),
-                  TextButton.icon(
-                    key: const ValueKey('now-playing-queue'),
-                    onPressed: () => setState(() {
-                      destination = 2;
-                      showLyrics = false;
-                      search.clear();
-                    }),
-                    icon: const Icon(Icons.queue_music_rounded, size: 18),
-                    label: const Text('Queue'),
-                  ),
-                ],
-              ),
-              for (var offset = 0; offset < previewCount; offset++)
-                SizedBox(
-                  key: ValueKey('now-playing-next-$offset'),
-                  height: rowHeight,
-                  child: ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(
-                      Icons.music_note_rounded,
-                      size: 20,
-                      color: accent,
-                    ),
-                    title: Text(
-                      player.queue[player.index + 1 + offset].title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                    subtitle: Text(
-                      player.queue[player.index + 1 + offset].artist,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 10, color: muted),
-                    ),
-                    onTap: () => player.playAt(player.index + 1 + offset),
-                  ),
-                ),
+              Expanded(child: heroPanel),
+              if (previewCount > 0) ...[
+                const SizedBox(height: 14),
+                queuePanel,
+              ],
             ],
           );
         },
@@ -2156,7 +2362,7 @@ class _PlayerShellState extends State<PlayerShell> {
                   const Divider(),
                 ],
                 Text(
-                  'Auralis ${widget.updater?.currentVersion ?? '0.1.29'} · AGPL-3.0-or-later\nIndependent Flutter interface. Playback by libmpv. Telegram connectivity by TDLib.',
+                  'Auralis ${widget.updater?.currentVersion ?? '0.1.30'} · AGPL-3.0-or-later\nIndependent Flutter interface. Playback by libmpv. Telegram connectivity by TDLib.',
                   style: const TextStyle(
                     color: muted,
                     fontSize: 12,
@@ -2199,7 +2405,7 @@ class _PlayerShellState extends State<PlayerShell> {
             onPressed: () => showLicensePage(
               context: context,
               applicationName: 'Auralis',
-              applicationVersion: widget.updater?.currentVersion ?? '0.1.29',
+              applicationVersion: widget.updater?.currentVersion ?? '0.1.30',
             ),
             child: const Text('Licenses'),
           ),
