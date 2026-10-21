@@ -335,6 +335,23 @@ void main() {
           await tester.tap(find.byTooltip(tab).first);
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull, reason: '$size $tab');
+          if (tab == 'Telegram') {
+            final channel = find.widgetWithText(
+              CheckboxListTile,
+              'Music channel',
+            );
+            await tester.scrollUntilVisible(
+              channel,
+              80,
+              scrollable: find.descendant(
+                of: find.byKey(const ValueKey('telegram-channels')),
+                matching: find.byType(Scrollable),
+              ),
+            );
+            await tester.pumpAndSettle();
+            expect(channel.hitTestable(), findsOneWidget);
+            expect(tester.takeException(), isNull, reason: '$size channel list');
+          }
         }
         await tester.tap(find.byTooltip('Library').first);
         await tester.pumpAndSettle();
