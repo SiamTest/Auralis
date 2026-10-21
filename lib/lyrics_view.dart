@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:math' as math;
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -433,14 +432,14 @@ class _LyricsViewState extends State<LyricsView> {
             disabledBackgroundColor: const Color(0xFF18161D),
             disabledForegroundColor: const Color(0xFF6C6A76),
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(18),
+              borderRadius: BorderRadius.circular(12),
               side: BorderSide(
                 color: selected
                     ? Colors.transparent
                     : const Color(0xFF302B39),
               ),
             ),
-            padding: EdgeInsets.symmetric(horizontal: largeText ? 6 : 14, vertical: largeText ? 8 : 14),
+            padding: EdgeInsets.symmetric(horizontal: largeText ? 6 : 12, vertical: 8),
             textStyle: Theme.of(context).textTheme.labelLarge?.copyWith(
               fontWeight: FontWeight.w700,
             ),
@@ -485,96 +484,44 @@ class _LyricsViewState extends State<LyricsView> {
     child: Padding(padding: padding, child: child),
   );
 
-  Widget _headerCard(bool short) {
-    final track = _track;
-    final lyrics = _lyrics;
-    return _surfaceCard(
-      padding: const EdgeInsets.all(6),
-      radius: 30,
-      child: Row(
-        key: const ValueKey('lyrics-song-pill'),
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(short ? 18 : 22),
-            child: SizedBox(
-              width: short ? 54 : 62,
-              height: short ? 54 : 62,
-              child: widget.artwork,
-            ),
+  Widget _header() => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 8),
+    child: Row(
+      key: const ValueKey('lyrics-song-pill'),
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: SizedBox.square(dimension: 48, child: widget.artwork),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _track?.title ?? 'Nothing playing',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                _track?.artist ?? 'Choose a track first',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 12, color: Color(0xFFAAA7B4)),
+              ),
+            ],
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  track?.title ?? 'Nothing playing',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: short ? 18 : 20,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -.2,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  track?.artist ?? 'Choose a track first',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    color: Color(0xFFAAA7B4),
-                  ),
-                ),
-                if (lyrics != null) ...[
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: lyricsHighlight.withValues(alpha: .12),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      lyrics.instrumental
-                          ? 'Instrumental'
-                          : (_synced && lyrics.lines.isNotEmpty
-                                ? 'Following timed lyrics'
-                                : 'Showing static lyrics'),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: lyricsHighlight,
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          _options(),
-        ],
-      ),
-    );
-  }
-
-  Widget _bodyCard() => _surfaceCard(
-    padding: EdgeInsets.zero,
-    radius: 32,
-    child: ClipRRect(
-      borderRadius: BorderRadius.circular(32),
-      child: _body(),
+        ),
+        const SizedBox(width: 8),
+        _options(),
+      ],
     ),
   );
 
-  Widget _playback(bool short, bool reduced) {
+  Widget _playback(bool reduced) {
     final player = widget.player, audio = player.audio;
     final duration = audio.duration.inMilliseconds;
     final progress = duration <= 0
@@ -583,7 +530,7 @@ class _LyricsViewState extends State<LyricsView> {
     final buffered = duration <= 0
         ? 0.0
         : (audio.buffered.inMilliseconds / duration).clamp(0.0, 1.0);
-    final size = short ? 48.0 : 72.0;
+    const size = 44.0;
     return Row(
       children: [
         SizedBox(
@@ -638,12 +585,20 @@ class _LyricsViewState extends State<LyricsView> {
                           ? Icons.pause_rounded
                           : Icons.play_arrow_rounded,
                       key: ValueKey(audio.playing),
-                      size: short ? 28 : 36,
+                      size: 28,
                     ),
             ),
           ),
         ),
         const SizedBox(width: 12),
+        SizedBox(
+          width: 32,
+          child: Text(
+            clockText(audio.position),
+            maxLines: 1,
+            style: const TextStyle(fontSize: 10, color: Color(0xFFAAA4B5)),
+          ),
+        ),
         Expanded(
           child: DecoratedBox(
             key: const ValueKey('lyrics-seek-pill'),
@@ -684,33 +639,50 @@ class _LyricsViewState extends State<LyricsView> {
             ),
           ),
         ),
+        SizedBox(
+          width: 32,
+          child: Text(
+            clockText(audio.duration),
+            maxLines: 1,
+            textAlign: TextAlign.right,
+            style: const TextStyle(fontSize: 10, color: Color(0xFFAAA4B5)),
+          ),
+        ),
       ],
     );
   }
 
 
   Widget _transportDock({
-    required bool short,
     required bool reduced,
     required bool showModeSelector,
   }) => _surfaceCard(
-    radius: 32,
-    padding: EdgeInsets.fromLTRB(16, short ? 14 : 16, 16, short ? 14 : 16),
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _playback(short, reduced),
-        if (showModeSelector) ...[
-          const SizedBox(height: 14),
-          Row(
+    radius: 16,
+    padding: const EdgeInsets.all(12),
+    child: LayoutBuilder(
+      builder: (context, box) {
+        final modes = showModeSelector
+            ? Row(children: [_mode(true), const SizedBox(width: 8), _mode(false)])
+            : const SizedBox.shrink();
+        if (box.maxWidth >= 700) {
+          return Row(
             children: [
-              _mode(true),
-              const SizedBox(width: 10),
-              _mode(false),
+              Expanded(child: _playback(reduced)),
+              if (showModeSelector) ...[
+                const SizedBox(width: 24),
+                SizedBox(width: 240, child: modes),
+              ],
             ],
-          ),
-        ],
-      ],
+          );
+        }
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _playback(reduced),
+            if (showModeSelector) ...[const SizedBox(height: 8), modes],
+          ],
+        );
+      },
     ),
   );
 
@@ -754,151 +726,18 @@ class _LyricsViewState extends State<LyricsView> {
     );
   }
 
-  Widget _infoPanel() {
-    final track = _track;
-    final lyrics = _lyrics;
-    return LayoutBuilder(
-      builder: (context, bounds) {
-        final tight = bounds.maxHeight < 530;
-        final veryTight = bounds.maxHeight < 390;
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _surfaceCard(
-              radius: 28,
-              padding: EdgeInsets.all(tight ? 12 : 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Center(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(20),
-                      child: SizedBox.square(
-                        dimension: veryTight ? 70 : tight ? 110 : 170,
-                        child: widget.artwork,
-                      ),
-                    ),
-                  ),
-                  SizedBox(height: tight ? 8 : 12),
-                  Text(
-                    track?.title ?? 'Nothing playing',
-                    maxLines: tight ? 1 : 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: tight ? 17 : 21,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    track?.artist ?? 'Choose a track first',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12, color: Color(0xFFB0ABBA)),
-                  ),
-                  if (!veryTight) ...[
-                    SizedBox(height: tight ? 8 : 12),
-                    Container(
-                      width: double.infinity,
-                      padding: EdgeInsets.all(tight ? 10 : 12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF15131A),
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(color: const Color(0xFF2B2733)),
-                      ),
-                      child: Text(
-                        lyrics == null ? 'No lyrics loaded yet.' : _sourceText(lyrics),
-                        maxLines: tight ? 2 : 3,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Color(0xFFE7E2F3),
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            if (lyrics != null && !lyrics.instrumental) ...[
-              SizedBox(height: tight ? 8 : 12),
-              _surfaceCard(
-                radius: 24,
-                padding: EdgeInsets.all(tight ? 10 : 14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (!veryTight) ...[
-                      const Text(
-                        'Reading mode',
-                        style: TextStyle(fontSize: 12, color: Color(0xFF9D97AC)),
-                      ),
-                      const SizedBox(height: 6),
-                    ],
-                    Row(
-                      children: [
-                        _mode(true),
-                        const SizedBox(width: 8),
-                        _mode(false),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _compactLayout({required bool short, required bool reduced}) {
-    final lyrics = _lyrics;
-    final showModeSelector = lyrics != null && !lyrics.instrumental;
-    return Column(
-      children: [
-        _headerCard(short),
-        const SizedBox(height: 12),
-        Expanded(child: _bodyCard()),
-        const SizedBox(height: 12),
-        _transportDock(
-          short: short,
-          reduced: reduced,
-          showModeSelector: showModeSelector,
-        ),
-        const SizedBox(height: 10),
-        _footerMetaRow(compact: true),
-      ],
-    );
-  }
-
-  Widget _wideLayout({required bool short, required bool reduced}) => Column(
+  Widget _layout({required bool short, required bool reduced}) => Column(
     children: [
-      Expanded(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(
-              child: Column(
-                children: [
-                  _headerCard(short),
-                  const SizedBox(height: 14),
-                  Expanded(child: _bodyCard()),
-                ],
-              ),
-            ),
-            const SizedBox(width: 16),
-            SizedBox(
-              width: 320,
-              child: _infoPanel(),
-            ),
-          ],
-        ),
+      _header(),
+      const SizedBox(height: 8),
+      Expanded(child: _body()),
+      const SizedBox(height: 8),
+      _transportDock(
+        reduced: reduced,
+        showModeSelector: _lyrics != null && !_lyrics!.instrumental,
       ),
-      const SizedBox(height: 14),
-      _transportDock(short: short, reduced: reduced, showModeSelector: false),
-      const SizedBox(height: 10),
-      _footerMetaRow(compact: false),
+      const SizedBox(height: 8),
+      _footerMetaRow(compact: short),
     ],
   );
 
@@ -923,12 +762,14 @@ class _LyricsViewState extends State<LyricsView> {
         child: LayoutBuilder(
           builder: (context, box) {
             final short = box.maxHeight < 620;
-            final wide = box.maxWidth >= 1000 && box.maxHeight >= 560;
-            return Padding(
-              padding: EdgeInsets.fromLTRB(16, short ? 8 : 16, 16, short ? 8 : 14),
-              child: wide
-                  ? _wideLayout(short: short, reduced: reduced)
-                  : _compactLayout(short: short, reduced: reduced),
+            return Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1080),
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(16, short ? 8 : 16, 16, short ? 8 : 16),
+                  child: _layout(short: short, reduced: reduced),
+                ),
+              ),
             );
           },
         ),
@@ -1078,7 +919,7 @@ class _SyncedLyricsState extends State<_SyncedLyrics> {
             textDirection: direction,
             textScaler: scaler,
           )..layout(maxWidth: math.max(1, box.maxWidth - 48));
-          final height = math.max(76.0, painter.height + 44);
+          final height = math.max(64.0, painter.height + 28);
           painter.dispose();
           _offsets.add(offset);
           _heights.add(height);
@@ -1173,38 +1014,19 @@ class _SyncedLyricsState extends State<_SyncedLyrics> {
                       child: Padding(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 24,
-                          vertical: 22,
+                          vertical: 14,
                         ),
-                        child: TweenAnimationBuilder<double>(
-                          duration: Duration(milliseconds: reduced ? 0 : 360),
+                        child: AnimatedDefaultTextStyle(
+                          duration: Duration(milliseconds: reduced ? 0 : 240),
                           curve: Curves.easeOutCubic,
-                          tween: Tween(
-                            end: current || !_follow
-                                ? 0.0
-                                : math.min(3.0, 1.5 + distance * .35),
+                          style: style.copyWith(
+                            color: current
+                                ? lyricsHighlight
+                                : Colors.white.withValues(
+                                    alpha: !_follow ? .72 : (distance <= 1 ? .56 : .32),
+                                  ),
                           ),
-                          builder: (context, blur, child) => ImageFiltered(
-                            imageFilter: ui.ImageFilter.blur(
-                              sigmaX: blur,
-                              sigmaY: blur,
-                            ),
-                            enabled: blur > .01,
-                            child: child,
-                          ),
-                          child: AnimatedDefaultTextStyle(
-                            duration: Duration(milliseconds: reduced ? 0 : 360),
-                            curve: Curves.easeOutCubic,
-                            style: style.copyWith(
-                              color: current
-                                  ? lyricsHighlight
-                                  : Colors.white.withValues(
-                                      alpha: !_follow
-                                          ? .72
-                                          : (distance <= 1 ? .24 : .12),
-                                    ),
-                            ),
-                            child: Text(line.text.isEmpty ? '♪' : line.text),
-                          ),
+                          child: Text(line.text.isEmpty ? '♪' : line.text),
                         ),
                       ),
                     ),
