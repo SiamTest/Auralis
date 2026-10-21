@@ -480,3 +480,16 @@ The existing adaptive test exercises 390×844 with upcoming tracks and retains i
 Local checks: modified Dart syntax, archive integrity, and an exact five-file diff from 0.1.36 were verified. Flutter is unavailable locally, so no analyzer or widget-test pass is claimed. Rerun the existing static analysis and complete Flutter test steps in both workflows. No binary build or release was performed locally.
 
 Reference: https://api.flutter.dev/flutter/material/Ink-class.html (transparent Material above opaque graphics).
+
+
+## 0.1.37+38 test-only action hit-target correction — 21 October 2026
+
+The supplied Windows and Linux logs now fail at the adaptive test's assertion that the entire `now-playing-actions` widget is hit-testable. That key identifies a Wrap layout. Finder.hitTestable() probes the target element's centre by default; the centre of a left-aligned or multi-row Wrap can be unused space rather than a button. This assertion therefore tests a layout coordinate that is not intended to be interactive.
+
+The assertion now requires `buttons.hitTestable()` to find all five actual action buttons, using the existing descendant finder for IconButton and FilledButton. This verifies five intended tap targets instead of one arbitrary point in the surrounding layout. Existing five-button presence checks, artwork/button bounds, layout-exception checks, no-scroll checks, Queue navigation, preview visibility, and the Telegram channel reachability check remain unchanged. No error is swallowed and no test is skipped.
+
+This revision changes only the adaptive test and release/verification notes. Every application source file, pubspec, platform file, and workflow is byte-identical to 0.1.37+38; there is no application-version increment.
+
+Local checks: the modified Dart test parses with the tree-sitter Dart grammar; source ZIP integrity and an exact three-file diff from the preceding 0.1.37 archive were verified. Flutter is unavailable locally, so neither a Flutter test pass nor an analyzer pass is claimed. Rerun the complete existing CI checks.
+
+Reference: https://api.flutter.dev/flutter/flutter_test/Finder/hitTestable.html (default Alignment.center and relative target coordinates).
