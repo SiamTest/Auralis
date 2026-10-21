@@ -292,6 +292,18 @@ void main() {
           expect(row.bottom, lessThanOrEqualTo(page.bottom));
           expect(row.top, greaterThanOrEqualTo(page.top));
         }
+        if (size.width >= 1000 && size.height >= 680) {
+          expect(
+            tester.getSize(find.byKey(const ValueKey('now-playing-artwork'))).width,
+            greaterThanOrEqualTo(180),
+            reason: '$size gives the cover room rather than a tiny thumbnail',
+          );
+          expect(
+            tester.getSize(find.byKey(const ValueKey('player-bar'))).height,
+            lessThan(130),
+            reason: '$size keeps the desktop player compact',
+          );
+        }
         final artPosition = tester.getRect(
           find.byKey(const ValueKey('now-playing-artwork')),
         );
