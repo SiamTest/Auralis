@@ -273,8 +273,9 @@ void main() {
           findsNothing,
         );
         expect(
-          find.byKey(const ValueKey('now-playing-actions')).hitTestable(),
-          findsOneWidget,
+          buttons.hitTestable(),
+          findsNWidgets(5),
+          reason: '$size every action must be reachable at its own centre',
         );
         expect(
           find.byKey(const ValueKey('now-playing-queue')).hitTestable(),
