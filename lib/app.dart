@@ -1647,7 +1647,7 @@ class _PlayerShellState extends State<PlayerShell> {
               border: Border.all(color: const Color(0xFF312C3A)),
             ),
             padding: padding,
-            child: child,
+            child: Material(type: MaterialType.transparency, child: child),
           );
 
           Widget tonalAction({
@@ -2593,7 +2593,7 @@ class _PlayerShellState extends State<PlayerShell> {
                   const Divider(),
                 ],
                 Text(
-                  'Auralis ${widget.updater?.currentVersion ?? '0.1.36'} · AGPL-3.0-or-later\nIndependent Flutter interface. Playback by libmpv. Telegram connectivity by TDLib.',
+                  'Auralis ${widget.updater?.currentVersion ?? '0.1.37'} · AGPL-3.0-or-later\nIndependent Flutter interface. Playback by libmpv. Telegram connectivity by TDLib.',
                   style: const TextStyle(
                     color: muted,
                     fontSize: 12,
@@ -2636,7 +2636,7 @@ class _PlayerShellState extends State<PlayerShell> {
             onPressed: () => showLicensePage(
               context: context,
               applicationName: 'Auralis',
-              applicationVersion: widget.updater?.currentVersion ?? '0.1.36',
+              applicationVersion: widget.updater?.currentVersion ?? '0.1.37',
             ),
             child: const Text('Licenses'),
           ),
