@@ -164,10 +164,18 @@ void main() {
         File('.github/workflows/android.yml').readAsStringSync(),
       ) as YamlMap;
       final jobs = workflow['jobs'] as YamlMap;
-      expect(jobs.keys, ['build']);
+      expect(jobs.keys, ['build', 'publish']);
       expect(jobs['build']['needs'], isNull);
       expect(jobs['build']['runs-on'], 'ubuntu-24.04');
       expect(workflow['permissions']['contents'], 'read');
+      expect(jobs['publish']['needs'], 'build');
+      expect(jobs['publish']['permissions']['contents'], 'write');
+      expect(jobs['publish']['if'], contains("needs.build.outputs.signed == 'true'"));
+      expect(jobs['publish']['if'], contains("github.event_name != 'pull_request'"));
+      expect(
+        jobs['publish']['concurrency']['group'],
+        r'stable-release-${{ github.repository }}',
+      );
       final steps = jobs['build']['steps'] as YamlList;
       final sdk = steps.singleWhere((s) => s['name'] == 'Set up Android SDK');
       expect(
