@@ -467,3 +467,16 @@ The authenticated Telegram page previously laid out the search, guidance, wrappi
 The existing adaptive test still rejects layout exceptions at every size. It additionally scrolls to the fixture channel in Telegram and requires that row to be hit-testable, checking usable channel access as well as the absence of overflow. All earlier Now Playing containment and no-page-scroll assertions remain included. Source/About/Telegram version metadata is 0.1.36+37 / 0.1.36.
 
 Local verification: modified Dart syntax was checked with the tree-sitter Dart grammar; the source ZIP was checked for integrity and an exact expected six-file diff from 0.1.35. Flutter is not installed in this editing environment, so neither flutter analyze nor flutter test ran locally. The CI results above are the user's supplied results for the previous revision, not a claimed pass for 0.1.36. Rerun the existing analysis and complete test steps on Android/Linux and Windows. No APK/EXE build or release was performed locally.
+
+
+## 0.1.37+38 Now Playing tile ink surface — 21 October 2026
+
+The supplied Windows and Linux logs both fail the adaptive test at 390×844 on Now Playing: a ListTile detects an opaque decorated ancestor between itself and its nearest Material. This is an ink/background painting assertion, rather than another RenderFlex overflow. Windows reports 140 passed and one failure; Linux reports 117 passed, 23 skipped, and one failure.
+
+The local Now Playing panel helper is used by both the hero and Up Next panels. Its existing colored/bordered Container now wraps its contents in Material(type: MaterialType.transparency). Up Next rows therefore paint their tile backgrounds and interaction effects onto a surface above the opaque decoration. This follows Flutter's documented transparent-Material solution, preserves all existing panel geometry, and fixes every preview row through the shared helper. Other ListTile sites were inspected: Library track rows already have their own Material, while playlists, Telegram, settings, updates, and statistics have no intervening colored decoration on their tile-to-Material path.
+
+The existing adaptive test exercises 390×844 with upcoming tracks and retains its strict exception checks. No test was disabled or made to ignore this assertion; all previous tests and the Telegram scroll regression are unchanged. Source/About/Telegram version metadata is 0.1.37+38 / 0.1.37.
+
+Local checks: modified Dart syntax, archive integrity, and an exact five-file diff from 0.1.36 were verified. Flutter is unavailable locally, so no analyzer or widget-test pass is claimed. Rerun the existing static analysis and complete Flutter test steps in both workflows. No binary build or release was performed locally.
+
+Reference: https://api.flutter.dev/flutter/material/Ink-class.html (transparent Material above opaque graphics).
