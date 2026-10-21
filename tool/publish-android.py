@@ -45,15 +45,18 @@ def publish(root, env):
     tag = "v" + version
     if ref_type == "tag" and ref != tag:
         raise ValueError("The triggering tag must match pubspec.yaml.")
-    if env.get("SIGNED") != "true" or abi not in ("arm64-v8a", "x86_64"):
-        raise ValueError("Only a release-signed, supported Android ABI can be published.")
+    signed = env.get("SIGNED", "false")
+    if signed not in ("true", "false") or abi not in ("arm64-v8a", "x86_64"):
+        raise ValueError("A valid signing state and supported Android ABI are required.")
+    mode = "release" if signed == "true" else "debug"
+    suffix = "" if mode == "release" else "-debug"
 
     dist = root / "dist/android"
-    apk = dist / f"auralis-{version}-android-{abi}-release.apk"
+    apk = dist / f"auralis-{version}-android-{abi}-{mode}.apk"
     checksum = f"{digest(apk)}  {apk.name}"
     if checksum not in (dist / "SHA256SUMS.txt").read_text().splitlines():
         raise ValueError("The APK does not match its verified build checksum.")
-    provenance = dist / f"auralis-{version}-android-{abi}-provenance.zip"
+    provenance = dist / f"auralis-{version}-android-{abi}{suffix}-provenance.zip"
     notices = [dist / name for name in ("build-manifest.json", "THIRD_PARTY_NOTICES.md", "ANDROID.md")]
     licenses = sorted(path for path in (dist / "licenses").rglob("*") if path.is_file())
     if not licenses or not all(path.is_file() for path in notices):
@@ -64,7 +67,7 @@ def publish(root, env):
             entry.compress_type = zipfile.ZIP_DEFLATED
             entry.external_attr = 0o100644 << 16
             archive.writestr(entry, path.read_bytes())
-    sums = dist / f"SHA256SUMS-android-{abi}.txt"
+    sums = dist / f"SHA256SUMS-android-{abi}{suffix}.txt"
     sums.write_text("".join(f"{digest(path)}  {path.name}\n" for path in (apk, provenance)))
     files = [apk, provenance, sums]
 
