@@ -343,20 +343,22 @@ void main() {
         );
         final line = tester.getRect(find.byKey(const ValueKey('lyric-1')));
         expect(line.center.dy, closeTo(viewport.center.dy, 1), reason: '$size');
-        final activeFilter = tester.widget<ImageFiltered>(
+        expect(
           find.descendant(
-            of: find.byKey(const ValueKey('lyric-1')),
+            of: find.byKey(const ValueKey('synced-lyrics')),
             matching: find.byType(ImageFiltered),
           ),
+          findsNothing,
+          reason: 'Inactive lyrics stay sharp and readable',
         );
-        expect(activeFilter.enabled, isFalse);
-        final neighborFilter = tester.widget<ImageFiltered>(
+        final neighbor = tester.widget<AnimatedDefaultTextStyle>(
           find.descendant(
             of: find.byKey(const ValueKey('lyric-2')),
-            matching: find.byType(ImageFiltered),
+            matching: find.byType(AnimatedDefaultTextStyle),
           ),
         );
-        expect(neighborFilter.enabled, isTrue);
+        expect(neighbor.style.color!.a, greaterThanOrEqualTo(.5));
+        expect(find.text(song.title), findsOneWidget);
         expect(tester.takeException(), isNull);
       }
       final play = find.byKey(const ValueKey('lyrics-play-pause'));
