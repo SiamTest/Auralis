@@ -1605,415 +1605,207 @@ class _PlayerShellState extends State<PlayerShell> {
         key: const ValueKey('now-playing-layout'),
         builder: (context, box) {
           if (compact) return _miniNowPlaying(box, track);
-          final scale = MediaQuery.textScalerOf(context)
-              .scale(1)
-              .clamp(1.0, 2.0);
+          final scale = MediaQuery.textScalerOf(context).scale(1).clamp(1.0, 2.0);
           final rowHeight = 54.0 * scale;
           final upcoming = math.max(0, player.queue.length - player.index - 1);
-          final wide = box.maxWidth >= (compact ? 340 : 900);
-          final narrow = box.maxWidth < 560;
-          final reserved = compact
-              ? 250.0
-              : wide
-              ? 330.0
-              : narrow
-              ? 410.0
-              : 430.0;
-          final calculatedPreview = ((box.maxHeight - reserved) / rowHeight)
-              .floor()
-              .clamp(0, math.min(wide ? 3 : 2, upcoming));
-          final previewCount = box.maxWidth >= 700 &&
-                  box.maxHeight >= 280 &&
-                  upcoming > 0
-              ? (box.maxHeight >= 720 ? math.max(1, calculatedPreview) : 1)
-              : calculatedPreview;
-          final mime = track?.mime.split('/').last.toUpperCase() ?? 'AUDIO';
-          final duration = track?.duration ?? Duration.zero;
-          final detailPill = [
-            if (track?.source case final String source when source.isNotEmpty) source,
-            if (duration > Duration.zero) clockText(duration),
-            mime,
-          ].join(' • ');
+          final previewCount = upcoming > 0 &&
+                  ((box.maxWidth >= 600 && box.maxHeight >= 280 * scale) ||
+                      box.maxHeight >= 620 * scale)
+              ? math.min(upcoming, box.maxHeight >= 760 * scale ? 3 : 1)
+              : 0;
 
           Widget panel({
             required Widget child,
             EdgeInsetsGeometry padding = const EdgeInsets.all(16),
-            double radius = 28,
+            double radius = 20,
             Color color = surface,
-          }) => Container(
-            decoration: BoxDecoration(
-              color: color,
-              borderRadius: BorderRadius.circular(radius),
-              border: Border.all(color: const Color(0xFF312C3A)),
-            ),
-            padding: padding,
-            child: Material(type: MaterialType.transparency, child: child),
-          );
-
-          Widget tonalAction({
-            required IconData icon,
-            required String label,
-            required VoidCallback? onPressed,
-            Key? key,
-          }) => FilledButton.tonalIcon(
-            key: key,
-            onPressed: onPressed,
-            icon: Icon(icon, size: 18),
-            label: Text(label),
-            style: FilledButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(18),
-              ),
-            ),
-          );
-
-          Widget iconTrayButton({
-            required IconData icon,
-            required String tooltip,
-            required VoidCallback? onPressed,
-            Color? fg,
           }) => Material(
-            color: const Color(0xFF17141D),
-            borderRadius: BorderRadius.circular(22),
-            child: IconButton(
-              tooltip: tooltip,
-              onPressed: onPressed,
-              icon: Icon(icon, color: fg ?? const Color(0xFFEAE5F3)),
-            ),
+            color: color,
+            borderRadius: BorderRadius.circular(radius),
+            clipBehavior: Clip.antiAlias,
+            child: Padding(padding: padding, child: child),
           );
 
-          final cover = ClipRRect(
-            borderRadius: BorderRadius.circular(compact ? 26 : 34),
-            child: Artwork(
-              key: const ValueKey('now-playing-artwork'),
-              seed: track?.title ?? 'Auralis',
-              telegram: telegram,
-              track: track,
-            ),
-          );
-
-          final heroArtwork = AspectRatio(
-            aspectRatio: 1,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(compact ? 26 : 34),
-                boxShadow: [
-                  BoxShadow(
-                    color: accent.withValues(alpha: .08),
-                    blurRadius: 28,
-                    spreadRadius: 2,
-                  ),
-                ],
+          Widget actions(bool labels) => Wrap(
+            key: const ValueKey('now-playing-actions'),
+            alignment: labels ? WrapAlignment.start : WrapAlignment.center,
+            spacing: labels ? 8 : 2,
+            children: [
+              if (labels)
+                FilledButton.tonalIcon(
+                  onPressed: track == null ? null : () => setState(() {
+                    destination = 3;
+                    showLyrics = true;
+                    search.clear();
+                  }),
+                  icon: const Icon(Icons.lyrics_rounded, size: 18),
+                  label: const Text('Lyrics'),
+                )
+              else
+                IconButton(
+                  tooltip: 'Lyrics',
+                  onPressed: track == null ? null : () => setState(() {
+                    destination = 3;
+                    showLyrics = true;
+                    search.clear();
+                  }),
+                  icon: const Icon(Icons.lyrics_rounded),
+                ),
+              if (labels)
+                FilledButton.tonalIcon(
+                  key: const ValueKey('now-playing-queue'),
+                  onPressed: () => setState(() {
+                    destination = 2;
+                    showLyrics = false;
+                    search.clear();
+                  }),
+                  icon: const Icon(Icons.queue_music_rounded, size: 18),
+                  label: const Text('Queue'),
+                )
+              else
+                IconButton(
+                  key: const ValueKey('now-playing-queue'),
+                  tooltip: 'Queue',
+                  onPressed: () => setState(() {
+                    destination = 2;
+                    showLyrics = false;
+                    search.clear();
+                  }),
+                  icon: const Icon(Icons.queue_music_rounded),
+                ),
+              IconButton(
+                tooltip: player.settings.favoriteIds.contains(track?.id)
+                    ? 'Remove from favorites' : 'Add to favorites',
+                onPressed: track == null ? null : () async {
+                  try {
+                    await player.toggleFavorite(track);
+                  } on StateError catch (e) {
+                    _notice(e.message);
+                  }
+                },
+                icon: Icon(
+                  player.settings.favoriteIds.contains(track?.id)
+                      ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                  color: player.settings.favoriteIds.contains(track?.id)
+                      ? accent : null,
+                ),
               ),
-              child: cover,
-            ),
+              IconButton(
+                tooltip: 'Add to playlist',
+                onPressed: track == null ? null : () => _choosePlaylist(track),
+                icon: const Icon(Icons.playlist_add_rounded),
+              ),
+              _sleepControl(),
+            ],
           );
 
-          final heroPanel = panel(
-            padding: const EdgeInsets.all(12),
-            radius: 28,
-            child: LayoutBuilder(
-              builder: (context, heroBox) {
-                final condensed = heroBox.maxHeight < 400 * scale;
-                final veryTight = heroBox.maxHeight < 220 * scale;
-                final titleBlock = Column(
-                  crossAxisAlignment: compact || wide
-                      ? CrossAxisAlignment.start
-                      : CrossAxisAlignment.center,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
+          final hero = LayoutBuilder(
+            builder: (context, heroBox) {
+              final sideBySide = heroBox.maxWidth >= 620;
+              final short = heroBox.maxHeight < 260 * scale;
+              final artSize = math.min(
+                sideBySide ? 340.0 : 280.0,
+                math.min(heroBox.maxHeight, heroBox.maxWidth * .38),
+              );
+              final artwork = ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: AspectRatio(
+                  aspectRatio: 1,
+                  child: Artwork(
+                    key: const ValueKey('now-playing-artwork'),
+                    seed: track?.title ?? 'Auralis',
+                    telegram: telegram,
+                    track: track,
+                  ),
+                ),
+              );
+              final details = Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: sideBySide || short
+                    ? CrossAxisAlignment.start : CrossAxisAlignment.center,
+                children: [
+                  Text(
+                    track?.title ?? 'Find your next favorite',
+                    key: const ValueKey('now-playing-title'),
+                    maxLines: short ? 1 : 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: sideBySide || short ? TextAlign.left : TextAlign.center,
+                    style: TextStyle(
+                      fontSize: short ? 22 : sideBySide ? 36 : 26,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -.7,
+                      height: 1.15,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    track?.artist ?? 'A space for the music you love',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: muted, fontSize: short ? 13 : 16),
+                  ),
+                  if (sideBySide && !short && track != null) ...[
+                    const SizedBox(height: 16),
                     Text(
-                      track?.title ?? 'Find your next favorite',
-                      key: const ValueKey('now-playing-title'),
-                      maxLines: condensed ? 1 : 2,
+                      [
+                        if (track.source.isNotEmpty) track.source,
+                        if (track.duration > Duration.zero) clockText(track.duration),
+                        track.mime.split('/').last.toUpperCase(),
+                      ].join(' · '),
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      textAlign: compact || wide ? TextAlign.left : TextAlign.center,
-                      style: TextStyle(
-                        fontSize: condensed ? 17 : narrow ? 22 : 28,
-                        fontWeight: FontWeight.w800,
-                        height: 1.05,
-                        letterSpacing: -.8,
-                      ),
+                      style: const TextStyle(color: muted, fontSize: 12),
                     ),
-                    if (!veryTight) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        track?.artist ?? 'A space for the music you love',
-                        maxLines: condensed ? 1 : 2,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: compact || wide ? TextAlign.left : TextAlign.center,
-                        style: TextStyle(
-                          color: const Color(0xFFD2CDDD),
-                          fontSize: condensed ? 12 : 16,
-                          fontWeight: FontWeight.w500,
-                          height: 1.2,
-                        ),
-                      ),
-                    ],
-                    if (!condensed) ...[
-                      const SizedBox(height: 12),
-                      Align(
-                        alignment: wide ? Alignment.centerLeft : Alignment.center,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 8,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF17141D),
-                            borderRadius: BorderRadius.circular(999),
-                            border: Border.all(color: const Color(0xFF2B2634)),
-                          ),
-                          child: Text(
-                            detailPill,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Color(0xFFB8B1C8),
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                    ),
-                    ],
                   ],
-                );
-
-                final actions = condensed || narrow
-                    ? Wrap(
-                        key: const ValueKey('now-playing-actions'),
-                        alignment: wide ? WrapAlignment.start : WrapAlignment.center,
-                        children: [
-                          IconButton(
-                            tooltip: 'Lyrics',
-                            onPressed: track == null ? null : () => setState(() {
-                              destination = 3;
-                              showLyrics = true;
-                              search.clear();
-                            }),
-                            icon: const Icon(Icons.lyrics_rounded),
-                          ),
-                          IconButton(
-                            key: const ValueKey('now-playing-queue'),
-                            tooltip: 'Queue',
-                            onPressed: () => setState(() {
-                              destination = 2;
-                              showLyrics = false;
-                              search.clear();
-                            }),
-                            icon: const Icon(Icons.queue_music_rounded),
-                          ),
-                          IconButton(
-                            tooltip: player.settings.favoriteIds.contains(track?.id)
-                                ? 'Remove from favorites' : 'Add to favorites',
-                            onPressed: track == null ? null : () async {
-                              try {
-                                await player.toggleFavorite(track);
-                              } on StateError catch (e) {
-                                _notice(e.message);
-                              }
-                            },
-                            icon: Icon(player.settings.favoriteIds.contains(track?.id)
-                                ? Icons.favorite_rounded : Icons.favorite_border_rounded),
-                          ),
-                          IconButton(
-                            tooltip: 'Add to playlist',
-                            onPressed: track == null ? null : () => _choosePlaylist(track),
-                            icon: const Icon(Icons.playlist_add_rounded),
-                          ),
-                          _sleepControl(),
-                        ],
-                      )
-                    : Wrap(
-                  key: const ValueKey('now-playing-actions'),
-                  alignment: wide || compact
-                      ? WrapAlignment.start
-                      : WrapAlignment.center,
-                  spacing: 10,
-                  runSpacing: 10,
+                  if (sideBySide) ...[
+                    const SizedBox(height: 20),
+                    actions(heroBox.maxWidth - artSize - 32 >= 440 * scale),
+                  ],
+                ],
+              );
+              if (sideBySide) {
+                return Row(
                   children: [
-                    tonalAction(
-                      icon: Icons.lyrics_rounded,
-                      label: 'Lyrics',
-                      onPressed: track == null
-                          ? null
-                          : () => setState(() {
-                              destination = 3;
-                              showLyrics = true;
-                              search.clear();
-                            }),
-                    ),
-                    tonalAction(
-                      key: const ValueKey('now-playing-queue'),
-                      icon: Icons.queue_music_rounded,
-                      label: 'Queue',
-                      onPressed: () => setState(() {
-                        destination = 2;
-                        showLyrics = false;
-                        search.clear();
-                      }),
-                    ),
-                    tonalAction(
-                      icon: player.settings.favoriteIds.contains(track?.id)
-                          ? Icons.favorite_rounded
-                          : Icons.favorite_border_rounded,
-                      label: player.settings.favoriteIds.contains(track?.id)
-                          ? 'Favorite'
-                          : 'Add to favorites',
-                      onPressed: track == null
-                          ? null
-                          : () async {
-                              try {
-                                await player.toggleFavorite(track);
-                              } on StateError catch (e) {
-                                _notice(e.message);
-                              }
-                            },
-                    ),
-                    tonalAction(
-                      icon: Icons.playlist_add_rounded,
-                      label: 'Add to playlist',
-                      onPressed: track == null ? null : () => _choosePlaylist(track),
-                    ),
-                    tonalAction(
-                      icon: player.sleepActive
-                          ? Icons.bedtime_rounded
-                          : Icons.bedtime_outlined,
-                      label: 'Sleep timer',
-                      onPressed: _sleepTimer,
-                    ),
+                    SizedBox.square(dimension: artSize, child: artwork),
+                    const SizedBox(width: 32),
+                    Expanded(child: details),
                   ],
                 );
-
-                final utilityTray = Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    iconTrayButton(
-                      icon: player.repeatMode == PlaybackRepeat.one
-                          ? Icons.repeat_one_rounded
-                          : Icons.repeat_rounded,
-                      tooltip: switch (player.repeatMode) {
-                        PlaybackRepeat.off => 'Repeat: off',
-                        PlaybackRepeat.all => 'Repeat: queue',
-                        PlaybackRepeat.one => 'Repeat: one track',
-                      },
-                      onPressed: player.toggleRepeat,
-                      fg: player.repeat ? accent : null,
-                    ),
-                    const SizedBox(width: 10),
-                    iconTrayButton(
-                      icon: Icons.playlist_play_rounded,
-                      tooltip: 'Open queue',
-                      onPressed: () => setState(() {
-                        destination = 2;
-                        showLyrics = false;
-                        search.clear();
-                      }),
-                    ),
-                    const SizedBox(width: 10),
-                    iconTrayButton(
-                      icon: player.settings.favoriteIds.contains(track?.id)
-                          ? Icons.favorite_rounded
-                          : Icons.favorite_border_rounded,
-                      tooltip: player.settings.favoriteIds.contains(track?.id)
-                          ? 'Remove from favorites'
-                          : 'Add to favorites',
-                      onPressed: track == null
-                          ? null
-                          : () async {
-                              try {
-                                await player.toggleFavorite(track);
-                              } on StateError catch (e) {
-                                _notice(e.message);
-                              }
-                            },
-                      fg: player.settings.favoriteIds.contains(track?.id)
-                          ? accent
-                          : null,
-                    ),
-                  ],
-                );
-
-                if (veryTight) {
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Expanded(
-                        child: Row(
-                          children: [
-                            SizedBox(
-                              width: 72,
-                              child: Center(child: heroArtwork),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(child: titleBlock),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      actions,
-                    ],
-                  );
-                }
-                return wide
-                    ? Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          SizedBox.square(
-                            dimension: math.min(
-                              heroBox.maxHeight,
-                              condensed ? 170.0 : 340.0,
-                            ),
-                            child: heroArtwork,
-                          ),
-                          const SizedBox(width: 18),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                titleBlock,
-                                const SizedBox(height: 18),
-                                actions,
-                                if (!condensed) ...[
-                                  const SizedBox(height: 18),
-                                  utilityTray,
-                                ],
-                              ],
-                            ),
-                          ),
-                        ],
-                      )
-                    : Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Expanded(
-                            child: Center(
-                              child: ConstrainedBox(
-                                constraints: BoxConstraints(
-                                  maxWidth: narrow ? 260 : 320,
-                                  maxHeight: narrow ? 260 : 320,
-                                ),
-                                child: heroArtwork,
+              }
+              return Column(
+                children: [
+                  Expanded(
+                    child: short
+                        ? Row(
+                            children: [
+                              SizedBox(
+                                width: math.min(112.0, heroBox.maxWidth * .32),
+                                child: Center(child: artwork),
                               ),
-                            ),
+                              const SizedBox(width: 16),
+                              Expanded(child: details),
+                            ],
+                          )
+                        : Column(
+                            children: [
+                              Expanded(
+                                child: Center(
+                                  child: ConstrainedBox(
+                                    constraints: const BoxConstraints(maxWidth: 280),
+                                    child: artwork,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              details,
+                            ],
                           ),
-                          SizedBox(height: condensed ? 8 : 16),
-                          titleBlock,
-                          SizedBox(height: condensed ? 8 : 16),
-                          actions,
-                          if (!condensed) ...[
-                            const SizedBox(height: 16),
-                            utilityTray,
-                          ],
-                        ],
-                      );
-              },
-            ),
+                  ),
+                  const SizedBox(height: 12),
+                  actions(false),
+                ],
+              );
+            },
           );
 
           final queueHeader = Row(
@@ -2046,8 +1838,8 @@ class _PlayerShellState extends State<PlayerShell> {
           final queuePanel = previewCount == 0
               ? const SizedBox.shrink()
               : panel(
-                  radius: 26,
-                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                  radius: 20,
+                  padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
                   color: const Color(0xFF17141D),
                   child: Column(
                     children: [
@@ -2100,26 +1892,25 @@ class _PlayerShellState extends State<PlayerShell> {
                   ),
                 );
 
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (compact) ...[
-                const Text(
-                  'NOW PLAYING',
-                  style: TextStyle(
-                    color: muted,
-                    fontSize: 9,
-                    letterSpacing: 1.8,
+          return Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1080),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      child: hero,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 10),
-              ],
-              Expanded(child: heroPanel),
-              if (previewCount > 0) ...[
-                const SizedBox(height: 14),
-                queuePanel,
-              ],
-            ],
+                  if (previewCount > 0) ...[
+                    const SizedBox(height: 16),
+                    queuePanel,
+                  ],
+                ],
+              ),
+            ),
           );
         },
       ),
@@ -2345,76 +2136,60 @@ class _PlayerShellState extends State<PlayerShell> {
       ],
     );
 
-    final utilityButtons = Wrap(
-      crossAxisAlignment: WrapCrossAlignment.center,
-      spacing: 6,
-      runSpacing: 6,
+    final utilityButtons = Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        _playerPanel(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-          radius: 18,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                onPressed: player.toggleRepeat,
-                tooltip: switch (player.repeatMode) {
-                  PlaybackRepeat.off => 'Repeat: off',
-                  PlaybackRepeat.all => 'Repeat: queue',
-                  PlaybackRepeat.one => 'Repeat: one track',
-                },
-                icon: Icon(
-                  player.repeatMode == PlaybackRepeat.one
-                      ? Icons.repeat_one_rounded
-                      : Icons.repeat_rounded,
-                  color: player.repeat ? accent : muted,
-                ),
-              ),
-              _sleepControl(key: const ValueKey('sleep-timer-control')),
-            ],
+        IconButton(
+          onPressed: player.toggleRepeat,
+          tooltip: switch (player.repeatMode) {
+            PlaybackRepeat.off => 'Repeat: off',
+            PlaybackRepeat.all => 'Repeat: queue',
+            PlaybackRepeat.one => 'Repeat: one track',
+          },
+          icon: Icon(
+            player.repeatMode == PlaybackRepeat.one
+                ? Icons.repeat_one_rounded : Icons.repeat_rounded,
+            color: player.repeat ? accent : muted,
           ),
         ),
+        _sleepControl(key: const ValueKey('sleep-timer-control')),
         _volumeControl(narrow),
       ],
     );
 
-    final progressBar = _playerPanel(
-      padding: EdgeInsets.fromLTRB(narrow ? 10 : 12, 6, narrow ? 10 : 12, 6),
-      radius: 20,
-      child: Row(
-        children: [
-          SizedBox(
-            width: 34,
-            child: Text(
-              clockText(audio.position),
-              style: const TextStyle(fontSize: 10, color: muted),
-            ),
+    final progressBar = Row(
+      children: [
+        SizedBox(
+          width: 34,
+          child: Text(
+            clockText(audio.position),
+            style: const TextStyle(fontSize: 10, color: muted),
           ),
-          Expanded(
-            child: WaveSeekBar(
-              value: progress,
-              buffered: buffer,
-              playing: audio.playing && !audio.buffering && player.current != null,
-              reducedMotion: player.settings.reducedMotion,
-              format: (v) =>
-                  clockText(Duration(milliseconds: (v * duration).round())),
-              onChanged: duration <= 0
-                  ? null
-                  : (v) => player.seek(
-                        Duration(milliseconds: (v * duration).round()),
-                      ),
-            ),
+        ),
+        Expanded(
+          child: WaveSeekBar(
+            value: progress,
+            buffered: buffer,
+            playing: audio.playing && !audio.buffering && player.current != null,
+            reducedMotion: player.settings.reducedMotion,
+            format: (v) =>
+                clockText(Duration(milliseconds: (v * duration).round())),
+            onChanged: duration <= 0
+                ? null
+                : (v) => player.seek(
+                      Duration(milliseconds: (v * duration).round()),
+                    ),
           ),
-          SizedBox(
-            width: 34,
-            child: Text(
-              clockText(audio.duration),
-              textAlign: TextAlign.right,
-              style: const TextStyle(fontSize: 10, color: muted),
-            ),
+        ),
+        SizedBox(
+          width: 34,
+          child: Text(
+            clockText(audio.duration),
+            textAlign: TextAlign.right,
+            style: const TextStyle(fontSize: 10, color: muted),
           ),
-        ],
-      ),
+        ),
+      ],
     );
 
     final compactPreview = Material(
@@ -2513,25 +2288,37 @@ class _PlayerShellState extends State<PlayerShell> {
                 ),
               ],
             )
-          : Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                progressBar,
-                const SizedBox(height: 10),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
+          : LayoutBuilder(
+              builder: (context, box) {
+                if (box.maxWidth < 960) {
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(children: [
+                        Expanded(child: compactPreview),
+                        transportButtons,
+                        utilityButtons,
+                      ]),
+                      progressBar,
+                    ],
+                  );
+                }
+                return Row(
                   children: [
-                    Expanded(flex: 5, child: _playerPanel(child: preview)),
-                    const SizedBox(width: 12),
-                    _playerPanel(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      child: transportButtons,
+                    Expanded(flex: 3, child: preview),
+                    const SizedBox(width: 24),
+                    Expanded(
+                      flex: 5,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [transportButtons, progressBar],
+                      ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 24),
                     utilityButtons,
                   ],
-                ),
-              ],
+                );
+              },
             ),
     );
   }
@@ -2593,7 +2380,7 @@ class _PlayerShellState extends State<PlayerShell> {
                   const Divider(),
                 ],
                 Text(
-                  'Auralis ${widget.updater?.currentVersion ?? '0.1.37'} · AGPL-3.0-or-later\nIndependent Flutter interface. Playback by libmpv. Telegram connectivity by TDLib.',
+                  'Auralis ${widget.updater?.currentVersion ?? '0.1.38'} · AGPL-3.0-or-later\nIndependent Flutter interface. Playback by libmpv. Telegram connectivity by TDLib.',
                   style: const TextStyle(
                     color: muted,
                     fontSize: 12,
@@ -2636,7 +2423,7 @@ class _PlayerShellState extends State<PlayerShell> {
             onPressed: () => showLicensePage(
               context: context,
               applicationName: 'Auralis',
-              applicationVersion: widget.updater?.currentVersion ?? '0.1.37',
+              applicationVersion: widget.updater?.currentVersion ?? '0.1.38',
             ),
             child: const Text('Licenses'),
           ),
