@@ -4,11 +4,23 @@ Auralis now shares its Flutter UI and Telegram library/player features between A
 
 ## Separate GitHub Action
 
-Commit the complete project, including the new `android/` folder, to your repository. Open **Actions → Android APK build**. It runs independently on pushes, pull requests and manual dispatch, with a manual architecture selector. Windows keeps `.github/workflows/windows.yml` and its existing compiled TDLib cache. Neither workflow depends on the other finishing.
+Commit the complete project, including the new `android/` folder, to your repository. Open **Actions → Android APK build**. It runs independently on pushes, pull requests and manual dispatch, with a manual architecture selector. Windows keeps `.github/workflows/windows.yml` and its existing compiled TDLib cache. The Android build never needs Windows build results. Publishing shares the same versioned release: Windows publishes the release, and Android can attach its assets before or after that happens.
 
 The Android workflow installs Java 17, Flutter 3.47.1, Android SDK 36 / build tools 36.0.0, NDK 28.2.13676358 and host build tools. It resolves the lockfile, runs analysis and tests, builds pinned TDLib/OpenSSL for the selected ABI, compiles an ABI-split APK with `--split-per-abi`, verifies its signing and required native libraries, checks that the APK contains **only** the requested ABI, checks all native ELF load segments for 16 KiB alignment, and uploads the APK, SHA-256 checksums and native provenance as an Actions artifact. The initial TDLib build is substantial; later compatible runs reuse its ABI-specific cache. Tests and the final APK build always run, including on cache hits.
 
-Download **auralis-android-arm64-v8a-development** or **auralis-android-arm64-v8a-release** from the successful run's **Artifacts** area, extract it and install its APK on your phone. This workflow builds artifacts only. It does not publish a GitHub Release, replace Windows assets or upload to Google Play.
+Download **auralis-android-arm64-v8a-development** or **auralis-android-arm64-v8a-release** from the successful run's **Artifacts** area, extract it and install its APK on your phone. Signed APKs built on `main` or a matching stable `v*` tag also run **Attach signed Android APK to release**. The publisher adds the release APK, `SHA256SUMS-android-<ABI>.txt`, and `auralis-<version>-android-<ABI>-provenance.zip` to the matching GitHub Release. Android checksums have their own name, so Windows checksums and downloads remain intact. Development APKs and feature-branch/PR builds stay in Actions artifacts; Google Play upload is not included.
+
+## Automatic GitHub Release attachments
+
+1. Configure the four signing secrets listed below, then commit this complete source to `main`.
+2. Open **Actions → Android APK build → Run workflow**, choose `main`, and keep **arm64-v8a** for a phone APK. A push to `main` also runs it automatically. Re-running an old commit still uses that commit's old workflow.
+3. Once analysis, tests, native checks, signing, and APK verification succeed, the separate publishing job attaches the signed APK to `v<pubspec version>`. The existing **v0.1.37** release can be filled without an app-version bump when the app sources still match that tag; publishing-only changes are allowed, different app sources are rejected.
+
+If Android finishes first for a new version, it creates a **draft**, uploads and verifies its Android assets, and leaves publication to the existing Windows publisher. If Windows finishes first, Android appends its assets to the published release. Both publishing jobs use the same concurrency group. For a brand-new version started manually only on Android, also run the Windows workflow for that same commit to publish the shared draft.
+
+Published assets are not overwritten and tags are not moved. Completed same-version Android releases are left intact on retries; interrupted uploads can resume from the same verified artifact. ARM64 and x86_64 asset/checksum/provenance names are distinct. Missing signing secrets produce an explicit Actions summary and a development artifact, and skip public APK publication. A partially configured signing set fails rather than silently falling back.
+
+The APK build keeps read-only repository permission. Only the guarded publishing job receives `contents: write`, and it downloads the tested artifact from its own successful Android build. Publication is never authorized on pull requests or feature branches.
 
 ## Signing and upgrades
 
