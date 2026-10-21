@@ -170,7 +170,8 @@ void main() {
       expect(workflow['permissions']['contents'], 'read');
       expect(jobs['publish']['needs'], 'build');
       expect(jobs['publish']['permissions']['contents'], 'write');
-      expect(jobs['publish']['if'], contains("needs.build.outputs.signed == 'true'"));
+      expect(jobs['publish']['if'], isNot(contains('needs.build.outputs.signed')));
+      expect(jobs['publish']['env']['SIGNED'], r'${{ needs.build.outputs.signed }}');
       expect(jobs['publish']['if'], contains("github.event_name != 'pull_request'"));
       expect(
         jobs['publish']['concurrency']['group'],
