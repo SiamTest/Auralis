@@ -174,14 +174,43 @@ class AndroidPublishTest(unittest.TestCase):
             self.run_publish()
         self.assertEqual(self.mutations(), [])
 
-    def test_untrusted_refs_debug_builds_and_wrong_version_never_contact_github(self):
+    def test_untrusted_refs_invalid_signing_state_and_wrong_version_never_contact_github(self):
         for env in (dict(GITHUB_EVENT_NAME="pull_request"), dict(GITHUB_REF_NAME="feature"),
-                    dict(SIGNED="false"), dict(ABI="armeabi-v7a"),
+                    dict(SIGNED="invalid"), dict(ABI="armeabi-v7a"),
                     dict(GITHUB_REF_TYPE="tag", GITHUB_REF_NAME="v0.9.1"),
                     dict(GITHUB_REPOSITORY="bad/repo/extra"), dict(GITHUB_SHA="0" * 40)):
             with self.subTest(env=env), self.assertRaises(ValueError):
                 self.run_publish(**env)
         self.assertEqual(self.github.calls, [])
+
+    def debug_artifact(self):
+        target = self.apk.with_name(self.apk.name.replace('-release.apk', '-debug.apk'))
+        self.apk.rename(target)
+        self.apk = target
+        self.checksum()
+
+    def test_debug_apk_is_published_without_custom_signing(self):
+        self.debug_artifact()
+        self.run_publish(SIGNED="false")
+        names = {asset['name'] for asset in self.github.release['assets']}
+        self.assertIn(self.apk.name, names)
+        self.assertIn('SHA256SUMS-android-arm64-v8a-debug.txt', names)
+        self.assertIn('auralis-0.9.0-android-arm64-v8a-debug-provenance.zip', names)
+        self.assertFalse(any(name.endswith('-release.apk') for name in names))
+
+    def test_absent_signing_state_defaults_to_debug(self):
+        self.debug_artifact()
+        self.env.pop('SIGNED')
+        self.run_publish()
+        self.assertIn(self.apk.name, {asset['name'] for asset in self.github.release['assets']})
+
+    def test_debug_and_release_assets_coexist_without_replacing_each_other(self):
+        self.run_publish()
+        before = copy.deepcopy(self.github.release['assets'])
+        self.debug_artifact()
+        self.run_publish(SIGNED="false")
+        self.assertEqual(self.github.release['assets'][:len(before)], before)
+        self.assertEqual(len(self.github.release['assets']), 7)
 
     def test_tampered_artifact_and_missing_licenses_never_contact_github(self):
         self.apk.write_bytes(b"tampered")
