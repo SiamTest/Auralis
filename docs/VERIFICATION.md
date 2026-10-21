@@ -456,3 +456,14 @@ The hero now decides its layout from its own constraints after the queue preview
 The adaptive test additionally requires all five action buttons and artwork bounds to stay within the page across its existing nine sizes; the responsive Library expectation now reports its viewport size. Version metadata in pubspec, About, and the Telegram client is 0.1.35+36 / 0.1.35. The previous typed ScrollCacheExtent fix remains included.
 
 Local verification: all modified Dart files parse with the tree-sitter Dart grammar, and the packaged ZIP is checked for integrity and an exact expected file diff. This is syntax checking, not Flutter type analysis or runtime layout validation. Flutter/Dart are unavailable locally and the matching SDK could not be retrieved, so no widget-test or analyzer pass is claimed for this revision. Rerun `flutter analyze --no-pub --fatal-infos` and `flutter test --no-pub --reporter expanded` in the existing Android and Windows workflows. No APK/EXE build or release was performed locally.
+
+
+## 0.1.36+37 Telegram channel-browser overflow — 21 October 2026
+
+The supplied follow-up CI logs show that the earlier Now Playing, collection, lyrics-return and responsive UI failures are cleared. Linux reports 117 passed, 23 skipped, and one failure; Windows reports 140 passed and the same one failure. Both fail in the adaptive test on the Telegram destination at 360×480 with a 4px bottom RenderFlex overflow.
+
+The authenticated Telegram page previously laid out the search, guidance, wrapping channel actions, and error banners as fixed children above an Expanded channel list. On the short phone viewport those header children alone exceeded the available height. Search remains fixed, while the guidance/actions/errors and lazy channel rows now share a bounded CustomScrollView using slivers. The empty state participates in that same scroll area. This avoids relying on a smaller font or an arbitrary four-pixel spacing reduction and leaves the controls reachable when rows wrap.
+
+The existing adaptive test still rejects layout exceptions at every size. It additionally scrolls to the fixture channel in Telegram and requires that row to be hit-testable, checking usable channel access as well as the absence of overflow. All earlier Now Playing containment and no-page-scroll assertions remain included. Source/About/Telegram version metadata is 0.1.36+37 / 0.1.36.
+
+Local verification: modified Dart syntax was checked with the tree-sitter Dart grammar; the source ZIP was checked for integrity and an exact expected six-file diff from 0.1.35. Flutter is not installed in this editing environment, so neither flutter analyze nor flutter test ran locally. The CI results above are the user's supplied results for the previous revision, not a claimed pass for 0.1.36. Rerun the existing analysis and complete test steps on Android/Linux and Windows. No APK/EXE build or release was performed locally.
