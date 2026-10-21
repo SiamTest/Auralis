@@ -1330,47 +1330,60 @@ class _PlayerShellState extends State<PlayerShell> {
       children: [
         _search('Find an accessible channel'),
         const SizedBox(height: 8),
-        const Text(
-          'Select channels to combine their music in Library.',
-          style: TextStyle(color: muted, fontSize: 12),
-        ),
-        Wrap(
-          spacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            Text(
-              '${channels.length} channels · ${telegram.connection}',
-              style: const TextStyle(fontSize: 11, color: muted),
-            ),
-            TextButton.icon(
-              onPressed: telegram.busy
-                  ? null
-                  : () => telegram.action(telegram.refreshChats),
-              icon: const Icon(Icons.refresh_rounded, size: 17),
-              label: const Text('Load more'),
-            ),
-            TextButton.icon(
-              onPressed: () => setState(() {
-                search.clear();
-                destination = 0;
-              }),
-              icon: const Icon(Icons.library_music_rounded, size: 17),
-              label: Text(
-                'Open Library (${player.settings.selectedChannels.length})',
-              ),
-            ),
-          ],
-        ),
-        if (telegram.error != null) _banner(telegram.error!),
-        if (library.error != null) _banner(library.error!),
         Expanded(
-          child: channels.isEmpty
-              ? _empty(
-                  Icons.campaign_outlined,
-                  'No channels to show',
-                  'Join a channel in Telegram, then load your channels here.',
+          child: CustomScrollView(
+            key: const ValueKey('telegram-channels'),
+            slivers: [
+              SliverToBoxAdapter(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text(
+                      'Select channels to combine their music in Library.',
+                      style: TextStyle(color: muted, fontSize: 12),
+                    ),
+                    Wrap(
+                      spacing: 8,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Text(
+                          '${channels.length} channels · ${telegram.connection}',
+                          style: const TextStyle(fontSize: 11, color: muted),
+                        ),
+                        TextButton.icon(
+                          onPressed: telegram.busy
+                              ? null
+                              : () => telegram.action(telegram.refreshChats),
+                          icon: const Icon(Icons.refresh_rounded, size: 17),
+                          label: const Text('Load more'),
+                        ),
+                        TextButton.icon(
+                          onPressed: () => setState(() {
+                            search.clear();
+                            destination = 0;
+                          }),
+                          icon: const Icon(Icons.library_music_rounded, size: 17),
+                          label: Text(
+                            'Open Library (${player.settings.selectedChannels.length})',
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (telegram.error != null) _banner(telegram.error!),
+                    if (library.error != null) _banner(library.error!),
+                  ],
+                ),
+              ),
+              if (channels.isEmpty)
+                SliverToBoxAdapter(
+                  child: _empty(
+                    Icons.campaign_outlined,
+                    'No channels to show',
+                    'Join a channel in Telegram, then load your channels here.',
+                  ),
                 )
-              : ListView.builder(
+              else
+                SliverList.builder(
                   itemCount: channels.length,
                   itemBuilder: (context, i) => CheckboxListTile(
                     value: library.selected(channels[i].id),
@@ -1405,6 +1418,8 @@ class _PlayerShellState extends State<PlayerShell> {
                     ),
                   ),
                 ),
+            ],
+          ),
         ),
       ],
     );
@@ -2578,7 +2593,7 @@ class _PlayerShellState extends State<PlayerShell> {
                   const Divider(),
                 ],
                 Text(
-                  'Auralis ${widget.updater?.currentVersion ?? '0.1.35'} · AGPL-3.0-or-later\nIndependent Flutter interface. Playback by libmpv. Telegram connectivity by TDLib.',
+                  'Auralis ${widget.updater?.currentVersion ?? '0.1.36'} · AGPL-3.0-or-later\nIndependent Flutter interface. Playback by libmpv. Telegram connectivity by TDLib.',
                   style: const TextStyle(
                     color: muted,
                     fontSize: 12,
@@ -2621,7 +2636,7 @@ class _PlayerShellState extends State<PlayerShell> {
             onPressed: () => showLicensePage(
               context: context,
               applicationName: 'Auralis',
-              applicationVersion: widget.updater?.currentVersion ?? '0.1.35',
+              applicationVersion: widget.updater?.currentVersion ?? '0.1.36',
             ),
             child: const Text('Licenses'),
           ),
